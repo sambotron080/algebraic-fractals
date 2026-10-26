@@ -1,0 +1,27 @@
+# Windows builds (MinGW, x86_64-pc-windows-gnu). Other targets, such as macOS, use
+# the defaults.
+#
+# Target any x86-64 CPU from roughly 2009 onwards (SSE4.2, POPCNT), so the
+# .exe files can be shared with other Windows PCs. "target-cpu=native" would
+# tune for this machine only and can crash elsewhere with "illegal instruction".
+#
+# The OpenH264 video encoder is C++. To keep each .exe self-contained, MinGW's C++
+# runtime is linked in statically: CXXSTDLIB_<target> = "" stops the cc crate from
+# linking libstdc++-6.dll, and the link args add the static library at the end instead.
+# (Programs that don't use it pull nothing from it.)
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+    "-C", "target-cpu=x86-64-v2",
+    "-C", "link-arg=-Wl,-Bstatic",
+    "-C", "link-arg=-lstdc++",
+    "-C", "link-arg=-lwinpthread",
+    "-C", "link-arg=-lgcc_eh",
+    "-C", "link-arg=-lgcc",
+    "-C", "link-arg=-Wl,-Bdynamic",
+    "-C", "link-arg=-lmingwex",
+    "-C", "link-arg=-lmsvcrt",
+    "-C", "link-arg=-lkernel32",
+]
+
+[env]
+CXXSTDLIB_x86_64_pc_windows_gnu = ""

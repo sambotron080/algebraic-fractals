@@ -1,0 +1,22 @@
+[package]
+name = "algebraic-fractals"
+version = "0.3.0"
+edition = "2021"
+description = "Explore algebraic-number fractals and make zoom videos of them"
+
+# src/lib.rs          -> the algfrac library: engine, colouring, density, files, video
+# src/bin/algfrac.rs  -> algfrac.exe (command line)
+# The app (src/main.rs, Explore and Video in one window) is still to be written: see SPEC.md.
+
+[lib]
+name = "algfrac"
+
+[dependencies]
+mp4 = "0.14.0"     # .mp4 muxer (pure Rust)
+openh264 = "0.9.9" # H.264 encoder, compiled from Cisco's OpenH264 source
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

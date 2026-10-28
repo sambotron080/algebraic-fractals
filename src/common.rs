@@ -38,16 +38,24 @@ impl View {
     }
 }
 
-/// A saved location: a view with a name, filed in a group. A group is usually the
-/// waypoints of one zoom video, in order. Only the view is kept: going to a location
+/// A saved location: a view with a name. Only the view is kept: going to a location
 /// keeps the search settings and colouring you have.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Location {
     pub name: String,
-    pub group: String,
     pub view: View,
 }
 
+/// Locations filed together, in order. A group is usually the waypoints of one zoom
+/// video.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Group {
+    pub name: String,
+    pub locations: Vec<Location>,
+}
+
+/// The group new locations go into unless another is chosen. It always exists.
+pub const UNSORTED: &str = "Unsorted";
 /// The group the old programs' saved places are brought into.
 pub const OLD_PLACES_GROUP: &str = "Old places";
 
@@ -82,43 +90,90 @@ fn one_line(s: &str) -> String {
 
 impl Location {
     /// Tab-separated: group, name, centre re, im, half-width.
-    pub fn to_line(&self) -> String {
+    pub fn to_line(&self, group: &str) -> String {
         let v = self.view;
-        format!("{}\t{}\t{}\t{}\t{}", one_line(&self.group), one_line(&self.name), v.cr, v.ci, v.hw)
+        format!("{}\t{}\t{}\t{}\t{}", one_line(group), one_line(&self.name), v.cr, v.ci, v.hw)
     }
 
-    pub fn from_line(line: &str) -> Option<Location> {
+    /// The group's name and the location, from a line written by `to_line`.
+    pub fn from_line(line: &str) -> Option<(String, Location)> {
         let f: Vec<&str> = line.split('\t').collect();
         let num = |i: usize| f.get(i)?.trim().parse::<f64>().ok().filter(|x| x.is_finite());
         let view = View { cr: num(2)?, ci: num(3)?, hw: num(4)?.abs() };
-        (view.hw > 0.0).then(|| Location { group: f[0].to_string(), name: f[1].to_string(), view })
+        (view.hw > 0.0).then(|| (f[0].to_string(), Location { name: f[1].to_string(), view }))
     }
 }
 
-/// The saved locations, in their order. Until there's a locations.tsv, the old programs'
-/// saved places are listed instead, in the group `OLD_PLACES_GROUP` (their order,
-/// coefficients and colouring are left behind, and so are their saved renders).
-pub fn load_locations() -> Vec<Location> {
-    let lines = |path: PathBuf| std::fs::read_to_string(path).ok();
-    let data = |s: &str| s.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect::<Vec<_>>();
-    if let Some(s) = lines(locations_path()) {
-        return data(&s).iter().filter_map(|l| Location::from_line(l)).collect();
+/// The groups from the lines of locations.tsv: a group's locations in the file's order,
+/// the groups in the order they first appear. A line holding only a group's name keeps
+/// an empty group.
+pub fn groups_from_text(text: &str) -> Vec<Group> {
+    let mut groups: Vec<Group> = Vec::new();
+    for line in text.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+        let (name, location) = match Location::from_line(line) {
+            Some((g, l)) => (g, Some(l)),
+            None if !line.contains('\t') => (line.to_string(), None),
+            None => continue,
+        };
+        let i = match groups.iter().position(|g| g.name == name) {
+            Some(i) => i,
+            None => {
+                groups.push(Group { name, locations: Vec::new() });
+                groups.len() - 1
+            }
+        };
+        groups[i].locations.extend(location);
     }
-    let old = lines(old_places_path()).map(|s| data(&s)).unwrap_or_default();
-    old.iter()
-        .filter_map(|l| OldPlace::from_line(l))
-        .map(|p| Location { name: p.name, group: OLD_PLACES_GROUP.into(), view: p.view })
-        .collect()
+    groups
 }
 
-pub fn store_locations(locations: &[Location]) -> std::io::Result<()> {
-    std::fs::create_dir_all(settings_dir())?;
+pub fn groups_to_text(groups: &[Group]) -> String {
     let mut s = String::from("# Algebraic Fractals saved locations: group, name, re, im, half-width\n");
-    for l in locations {
-        s += &l.to_line();
-        s.push('\n');
+    for g in groups {
+        if g.locations.is_empty() {
+            s += &one_line(&g.name);
+            s.push('\n');
+        }
+        for l in &g.locations {
+            s += &l.to_line(&g.name);
+            s.push('\n');
+        }
     }
-    std::fs::write(locations_path(), s)
+    s
+}
+
+/// The saved locations, by group, with Unsorted first. Until there's a locations.tsv,
+/// the old programs' saved places are listed too, in the group `OLD_PLACES_GROUP`, last
+/// (their order, coefficients and colouring are left behind, and so are their saved
+/// renders).
+pub fn load_groups() -> Vec<Group> {
+    let read = |path: PathBuf| std::fs::read_to_string(path).ok();
+    let mut groups = match read(locations_path()) {
+        Some(s) => groups_from_text(&s),
+        None => {
+            let old = read(old_places_path()).unwrap_or_default();
+            let locations: Vec<Location> = old
+                .lines()
+                .filter(|l| !l.starts_with('#'))
+                .filter_map(OldPlace::from_line)
+                .map(|p| Location { name: p.name, view: p.view })
+                .collect();
+            if locations.is_empty() { Vec::new() } else { vec![Group { name: OLD_PLACES_GROUP.into(), locations }] }
+        }
+    };
+    match groups.iter().position(|g| g.name == UNSORTED) {
+        Some(i) => {
+            let g = groups.remove(i);
+            groups.insert(0, g);
+        }
+        None => groups.insert(0, Group { name: UNSORTED.into(), locations: Vec::new() }),
+    }
+    groups
+}
+
+pub fn store_groups(groups: &[Group]) -> std::io::Result<()> {
+    std::fs::create_dir_all(settings_dir())?;
+    std::fs::write(locations_path(), groups_to_text(groups))
 }
 
 /// A line of the old programs' places.tsv, or a waypoint line of their saved video
@@ -228,18 +283,74 @@ pub fn sig(x: f64) -> String {
     format!("{x:.decimals$}")
 }
 
-/// Looks for the project's Results folder above the executable, else uses the current
-/// folder (or the home folder, for an app started from the macOS Finder, which starts in /).
-pub fn default_save_dir() -> String {
+/// A Results folder above the executable, if there is one (the developer's own setup).
+fn results_dir() -> Option<PathBuf> {
     let mut dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
     while let Some(d) = dir {
         if d.join("Results").is_dir() {
-            return d.join("Results").display().to_string();
+            return Some(d.join("Results"));
         }
         dir = d.parent().map(|p| p.to_path_buf());
     }
-    let cwd = std::env::current_dir().ok().filter(|d| d.parent().is_some());
-    cwd.or_else(|| std::env::var_os("HOME").map(PathBuf::from)).map_or_else(|| ".".into(), |d| d.display().to_string())
+    None
+}
+
+/// "Algebraic Fractals" in the user's folder for `kind` (Pictures, Videos, or Movies on
+/// macOS), unless there's a Results folder above the executable.
+fn default_dir(kind: &str) -> String {
+    if let Some(d) = results_dir() {
+        return d.display().to_string();
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    home.map_or_else(|| PathBuf::from("."), |h| h.join(kind).join("Algebraic Fractals")).display().to_string()
+}
+
+/// Where images are saved unless another folder is chosen.
+pub fn default_images_dir() -> String {
+    default_dir("Pictures")
+}
+
+/// Where videos are saved unless another folder is chosen.
+pub fn default_videos_dir() -> String {
+    default_dir(if cfg!(target_os = "macos") { "Movies" } else { "Videos" })
+}
+
+/// The first of `stem`, `stem_2`, `stem_3`, ... for which `taken` is false, so that
+/// nothing is ever overwritten.
+pub fn unused_stem(stem: &str, taken: impl Fn(&str) -> bool) -> String {
+    (1..).map(|i| if i == 1 { stem.to_string() } else { format!("{stem}_{i}") }).find(|s| !taken(s)).unwrap()
+}
+
+/// "3x^4 - 2x^2 + 1": highest power first, coefficients of ±1 left out (except the constant).
+pub fn poly_string(c: &[i32]) -> String {
+    let mut s = String::new();
+    for (i, &a) in c.iter().enumerate().rev() {
+        if a == 0 {
+            continue;
+        }
+        if s.is_empty() {
+            if a < 0 {
+                s.push('-');
+            }
+        } else {
+            s += if a < 0 { " - " } else { " + " };
+        }
+        let m = a.unsigned_abs();
+        if i == 0 || m != 1 {
+            s += &m.to_string();
+        }
+        if i >= 1 {
+            s.push('x');
+        }
+        if i >= 2 {
+            s += &format!("^{i}");
+        }
+    }
+    if s.is_empty() {
+        "0".into()
+    } else {
+        s
+    }
 }
 
 /// Chooses the order (`auto_order`) or else the max coefficient whose predicted density
@@ -368,11 +479,23 @@ mod tests {
     #[test]
     fn location_lines() {
         let v = View { cr: -0.1, ci: 1.0 / 3.0, hw: 2.5e-9 };
-        let l = Location { name: "spiral\tarm".into(), group: "deep zoom".into(), view: v };
-        let back = Location::from_line(&l.to_line()).unwrap();
-        assert_eq!(back, Location { name: "spiral arm".into(), ..l });
+        let l = Location { name: "spiral\tarm".into(), view: v };
+        let back = Location::from_line(&l.to_line("deep\tzoom")).unwrap();
+        assert_eq!(back, ("deep zoom".to_string(), Location { name: "spiral arm".into(), view: v }));
         assert_eq!(Location::from_line("g\tn\t0\t0\t0"), None);
         assert_eq!(Location::from_line("g\tn\t0\tx\t1"), None);
+        // groups keep their order and their locations' order, and empty ones survive
+        let at = |hw: f64| View { cr: 0.25, ci: -0.5, hw };
+        let groups = vec![
+            Group { name: UNSORTED.into(), locations: vec![Location { name: "a".into(), view: at(1.0) }] },
+            Group { name: "empty".into(), locations: vec![] },
+            Group { name: "dive".into(), locations: vec![Location { name: "b".into(), view: at(0.1) }, Location { name: "c".into(), view: at(1e-12) }] },
+        ];
+        assert_eq!(groups_from_text(&groups_to_text(&groups)), groups);
+        // a group's lines needn't be together
+        let mixed = "g\ta\t0\t0\t1\nh\tb\t0\t0\t1\ng\tc\t0\t0\t1\nbad\tline\n";
+        let g = groups_from_text(mixed);
+        assert_eq!(g.iter().map(|g| (g.name.as_str(), g.locations.len())).collect::<Vec<_>>(), [("g", 2), ("h", 1)]);
     }
 
     /// Lines written by the old programs: the oldest (9 columns) and the newest (25).

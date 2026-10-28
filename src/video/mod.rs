@@ -3,6 +3,9 @@
 //! style for the whole video), and writing the frames to an H.264 .mp4 file (OpenH264,
 //! compiled in, plus the mp4 crate's muxer).
 
+pub mod frames;
+pub mod make;
+pub mod project;
 pub mod reuse;
 
 use crate::common::{View, MAX_COEF};

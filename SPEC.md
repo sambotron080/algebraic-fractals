@@ -198,7 +198,7 @@ The toolbar and the settings strip are each one row when the window is wide enou
 - **Image:** the rest of the window, background grey 16. The image is scaled to fit, keeping its aspect ratio, and centred. Popups float over it.
 - **Status bar:** one line. On the left, the hover text; on the right, the latest status message ([7.12](#712-status-bar)).
 - **Window:** 1200 × 900 at start, title "Algebraic Fractals". The old explorer's side panel is gone, so the image gets the whole width.
-- A window icon, and an icon for the `.exe` and the Mac app. **(New, Decision)** The old programs had none.
+- A window icon, and an icon for the `.exe` and the Mac app. A rendered image of the lotus flower found at (-1)^(1/3)
 
 ### 5.2 Keyboard
 
@@ -241,11 +241,10 @@ Enter in a text box does that box's own action (Go, Save, and so on), as describ
 |---|---|---|---|
 | **Order** | 1–16 | the highest power of `x` | explorer: settings strip; video: Polynomials tab |
 | **Max coefficient** | 1–1 000 000 | the largest allowed `|c|` | explorer: settings strip; video: per waypoint, Polynomials tab |
-| **Coefficients** | integers; 1 and primes; Fibonacci numbers; odd numbers; triangular numbers; squares; cubes; powers of 2 | which sizes are allowed, each with either sign. Every set contains 1. In the dropdown, hovering a set shows its first members, e.g. `±1, ±2, ±3, ±5, ±7, ...` | explorer: Polynomials popup; video: Polynomials tab |
-| **allow 0** | on/off (default on) | whether a coefficient may be 0. Off means every power from 1 to the order appears. | as Coefficients |
+| **Coefficients** | integers; 1 and primes; Fibonacci numbers; odd numbers; triangular numbers; squares; cubes; powers of 2 | explorer: Polynomials popup; video: Polynomials tab |
+| **allow 0** | remove this feature it should just always be on.
 | **0 can be a root** | on/off (default on) | whether `c0` may be 0 (polynomials `x·q(x)`), so that 0 itself lights up. Off: `c0` is never 0 and 0 sits in a dark hole. | as Coefficients |
 
-The **Allowed** line lists the coefficients in use, e.g. `0, ±1, ±2, ±3, ±5, ±8`. Lists of more than 10 are shortened to `±1, ±2, ±3, ±4, ±5, ±6, ... ±1000 (1000 values)`. With allow 0 on and 0 can be a root off, it adds "(c0 is never 0)" (`allowed_text`).
 
 The max coefficient box can be dragged. The drag speed is 1% of the value (at least 0.2 per pixel), so large values change proportionally. Order drags at 0.05 per pixel.
 
@@ -254,7 +253,7 @@ The max coefficient box can be dragged. The drag speed is 1% of the value (at le
 How a star field looks depends mostly on how many algebraic numbers land per pixel. `density::Predictor` estimates this before rendering, in **algebraic numbers per 100 square pixels**, usually to within about 20%. In the program this is called the **root density**.
 
 `common::choose_auto` picks either the **order** or the **max coefficient** whose predicted density is closest to the **target root density** (in log ratio). It keeps all the other settings, and it never needs more than `max_steps` of work per pixel.
-- **The explorer** uses `max_steps` = 2·10⁴ (`AUTO_MAX_STEPS`), about 7 s at 256² or 2 minutes at 1024² on 12 cores. If the target needs more, a ⚠ in the settings strip explains why it fell short.
+- **The explorer** remove `max_steps` & (`AUTO_MAX_STEPS`) have the same behavoir as the **Videos** mentioned below
 - **Videos** use no work limit, so they can go up to max coefficient 1 000 000. The note then says "has too many polynomials to search".
 - The first prediction for a new coefficient set takes up to about 70 ms. After that, each view takes about 3 ms.
 
@@ -267,14 +266,14 @@ A **style** (`colour::Style`) decides how a render is coloured. Changing it reco
 | **Colour by** | 1 / residual^n (default); −log(residual); length (sum \|ci\|); height (max \|ci\|) | what's plotted. Power: brightness `(res/res_high)^(−n)`, clamped, stretched so `res_low` is black, computed in log space. Log: `−ln res` between the percentiles. Length/height: the polynomial's Σ\|ci\| or max\|ci\|, from the image's lowest to highest (or the video's fixed scale, [8.5](#85-colour-tab)). |
 | **Colormap** | 23 maps (bone default) | classic: bone, gray, hot, copper, pink, spring, summer, autumn, winter, cool, jet, parula; modern: inferno, magma, plasma, viridis, turbo; rainbow/psychedelic: hsv, sinebow, neon, acid, candy, cosmic. hsv, sinebow, neon and acid are cyclic (their ends match). |
 | colormap strip | | a 14 px strip under the colormap, 256 samples with every setting below applied: left = darkest pixels, right = brightest. Redrawn only when the style changes. |
-| **n** | 0.05–20, log slider (1) | the sharpness exponent, for 1/residual^n and for shading |
-| **max %** | 50–100 (99.5) | the brightness percentile that becomes full brightness |
+| **n** | 0.05–5, log slider (1) | the sharpness exponent, for 1/residual^n and for shading |
+| **max %** | 90–100 (99.5) | the brightness percentile that becomes full brightness |
 | **min %** | 0–100 (0) | the brightness percentile that becomes black. It's kept at least 0.1 below max %. |
 | **Smooth stars** | on/off (on) | average each pixel's brightness over the pixel instead of taking it at the centre (see [12](#12-the-engine-what-must-stay-true)) |
 | **Invert colormap** | on/off (off) | swap the ends |
 | **Shade by 1/res^n** | on/off (on) | length/height only: darken away from the stars |
 | **Log scale** | on/off (off) | length/height only: spread the colormap over the log of the length/height |
-| **brightness** | −1 to 1 (0) | lighten or darken every colour |
+| **brightness** | −0.5 to 0.5 (0) | lighten or darken every colour |
 | **contrast** | 0 to 4 (1) | spread colours from mid-grey, or squash them towards it |
 | **gamma** | 0.1–10, log (1) | above 1 brightens the faint points and midtones; black and full brightness stay put |
 | **saturation** | 0 to 3 (1) | 0 = grey, above 1 = more vivid |
@@ -316,17 +315,7 @@ A **location** is a saved view: a **name**, a **group**, a **centre** and a **ha
 
 ### 6.6 Renders kept in memory
 
-Every finished render is kept in a shared memory, so the same search never runs twice. This was in the old video maker; now the explorer uses it too **(New for the explorer)**.
-- **Key:** a render is filed under its order, its coefficients (with their max) and the exact bits of its sample points (`RenderKey`). A render with the same key is the same search.
-- **Size:** up to **3 GB**, least recently used dropped first, counting 8 bytes per axis value and residual, and 4 per coefficient. **(New)** Also count the colouring `Stats`, if they're kept with the render.
-- **The explorer uses it for:**
-  - **Back**, which is instant when the earlier view's render is still there with the same settings.
-  - **Refresh**, and changing a setting back again (e.g. order 3 → 4 → 3), which are instant.
-  - **Going back to a location** you've already rendered with the same settings.
-- **The video window uses it for:**
-  - the waypoint strip and the frame preview, which are kept and reused;
-  - **Render** takes renders already in memory where they match (only full-size ones will, so mostly the frame preview's).
-- It's cleared when the program closes.
+No don't do this, it will take up a lot of memory.
 
 ### 6.7 Folders and file names
 
@@ -335,7 +324,7 @@ Every finished render is kept in a shared memory, so the same search never runs 
   - Windows: `Pictures\Algebraic Fractals` for images and `Videos\Algebraic Fractals` for videos;
   - macOS: `~/Pictures/Algebraic Fractals` and `~/Movies/Algebraic Fractals`.
 
-  A `Results` folder above the program still wins, for the developer's own setup. The folders are created when the first file is saved.
+  
 - Each folder is a text box you can type any path into. **(New, Decision)** Each has a **Browse…** button with a native folder picker (the `rfd` crate).
 
 ### 6.8 Remembered settings (New)
@@ -355,7 +344,7 @@ Every finished render is kept in a shared memory, so the same search never runs 
 
 ### 7.1 On start
 
-It shows the home view (−2 … 2), order 3, integer coefficients up to 12 with 0 allowed and 0 can be a root, resolution 256 × 256, zoom × 4, default colouring, no popups open. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
+It shows the home view (−1.5 … 1.5), order 3, integer coefficients on auto with 0 allowed and 0 can be a root, resolution 512 × 512, zoom × 4, default colouring, no popups open. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
 
 ### 7.2 Toolbar
 
@@ -376,7 +365,7 @@ Left to right, as icon-and-word buttons, with hover text for each:
 | **Video ▾** | a menu ([7.9](#79-the-video-menu)) |
 | **☰** | a menu ([7.10](#710-the--menu)) |
 
-Run (zoom into the yellow box) has no button: it's Enter or a double-click on the image. **Decision:** add a **Run** button too, if you'd like one for mouse-only use.
+Run (zoom into the yellow box) has no button: it's Enter or a double-click on the image.  add a **Run** button too.
 
 Back, Home, Zoom out, Run, Go and going to a location all add the view being left to the Back list, and clear the clicked target.
 
@@ -425,7 +414,7 @@ The exact numbers of the view and the zoom:
 ### 7.6 Polynomials popup
 
 The search settings that aren't in the strip, and what they mean:
-- **Coefficients** dropdown, **allow 0**, **0 can be a root** ([6.2](#62-search-settings)).
+- **Coefficients** dropdown, **0 can be a root** ([6.2](#62-search-settings)).
 - Grey lines:
   - `Allowed: …`;
   - `1.95e+07 polynomials per pixel, searched in ~3.10e+02 steps` (`Plan::brute_len`, `Plan::steps`), or the plan's error in red;

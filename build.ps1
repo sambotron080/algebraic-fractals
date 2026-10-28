@@ -20,10 +20,17 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # dist\ holds the copies to share: each .exe is self-contained (only system DLLs)
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 $dist = "$PSScriptRoot\dist"
-Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
+try {
+    Remove-Item -Recurse -Force $dist -ErrorAction Stop
+} catch [System.Management.Automation.ItemNotFoundException] {
+} catch {
+    # most often: the program in dist\ is still running, so Windows won't replace it
+    Write-Error "Could not clear dist\ (is Algebraic Fractals or algfrac still running? Close it and build again): $_"
+    exit 1
+}
 New-Item -ItemType Directory -Force $dist | Out-Null
-Copy-Item "$PSScriptRoot\target\release\algebraic-fractals.exe" "$dist\Algebraic Fractals.exe"
-Copy-Item "$PSScriptRoot\target\release\algfrac.exe", "$PSScriptRoot\docs\USER-GUIDE.md" $dist
+Copy-Item "$PSScriptRoot\target\release\algebraic-fractals.exe" "$dist\Algebraic Fractals.exe" -ErrorAction Stop
+Copy-Item "$PSScriptRoot\target\release\algfrac.exe", "$PSScriptRoot\docs\USER-GUIDE.md" $dist -ErrorAction Stop
 $zip = "$dist\AlgebraicFractals-$version-windows-x64.zip"
 Compress-Archive -Path "$dist\Algebraic Fractals.exe", "$dist\algfrac.exe", "$dist\USER-GUIDE.md" -DestinationPath $zip -Force
 Write-Host "`nBuilt (shareable copies in dist\):"

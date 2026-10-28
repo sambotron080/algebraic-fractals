@@ -1,6 +1,7 @@
 //! Shared by the explorer and the video maker, without the window: views, saved
-//! places, number parsing and formatting, and the auto order / max coefficient.
-//! (Carried over from the old programs' src/bin/common/mod.rs, minus its egui widgets.)
+//! locations, number parsing and formatting, and the auto order / max coefficient.
+//! (Carried over from the old programs' src/bin/common/mod.rs, minus its egui widgets;
+//! saved places became locations in groups.)
 
 use crate::colour::{ColourBy, Colormap, Style};
 use crate::density::{dot, pixels, poly_counts, Predictor};
@@ -37,22 +38,23 @@ impl View {
     }
 }
 
-/// A named, saved view. Going to a place uses only its centre and half-width (and its
-/// saved render, if it has one: see `place_render_path`); the order, coefficients and
-/// colouring are kept with it because saved video paths store their waypoints in the
-/// same format, and use them.
-pub struct Place {
+/// A saved location: a view with a name, filed in a group. A group is usually the
+/// waypoints of one zoom video, in order. Only the view is kept: going to a location
+/// keeps the search settings and colouring you have.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Location {
     pub name: String,
+    pub group: String,
     pub view: View,
-    pub order: usize,
-    pub coefs: Coefs,
-    pub style: Style,
 }
 
-/// Saved places live in places.tsv, one per line, in %APPDATA%\AlgebraicFractals on
-/// Windows, ~/Library/Application Support/AlgebraicFractals on macOS, and
+/// The group the old programs' saved places are brought into.
+pub const OLD_PLACES_GROUP: &str = "Old places";
+
+/// Where saved locations, video projects and settings live: %APPDATA%\AlgebraicFractals
+/// on Windows, ~/Library/Application Support/AlgebraicFractals on macOS, and
 /// ~/.config/AlgebraicFractals elsewhere.
-pub fn places_path() -> PathBuf {
+pub fn settings_dir() -> PathBuf {
     let var = |v: &str| std::env::var_os(v).map(PathBuf::from);
     let base = if cfg!(windows) {
         var("APPDATA")
@@ -61,28 +63,83 @@ pub fn places_path() -> PathBuf {
     } else {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))
     };
-    base.map(|d| d.join("AlgebraicFractals")).unwrap_or_else(|| PathBuf::from(".")).join("places.tsv")
+    base.map(|d| d.join("AlgebraicFractals")).unwrap_or_else(|| PathBuf::from("."))
 }
 
-impl Place {
-    /// Tab-separated: name, centre re, im, half-width, order, set, (unused: once a
-    /// minimum |c|, now always 1), max, zero,
-    /// then the display style: colour by, n, max %, colormap, invert, shade; then zero_root;
-    /// then min %, gamma, cycles, shift, brightness, contrast, saturation; then log scale
-    /// for length/height; then smooth stars. (Columns were only ever added at the end, so
-    /// older files still load.)
+pub fn locations_path() -> PathBuf {
+    settings_dir().join("locations.tsv")
+}
+
+/// The old programs' saved places.
+pub fn old_places_path() -> PathBuf {
+    settings_dir().join("places.tsv")
+}
+
+/// Tabs and other control characters would break the line format.
+fn one_line(s: &str) -> String {
+    s.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect()
+}
+
+impl Location {
+    /// Tab-separated: group, name, centre re, im, half-width.
     pub fn to_line(&self) -> String {
-        let (v, c, s) = (self.view, self.coefs, self.style);
-        let name: String = self.name.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect();
-        format!(
-            "{name}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            v.cr, v.ci, v.hw, self.order, c.set.name(), 1, c.max, c.zero as u8,
-            s.by.short(), s.n, s.high, s.cmap.name(), s.invert as u8, s.shade as u8, c.zero_root as u8,
-            s.low, s.gamma, s.cycles, s.shift, s.brightness, s.contrast, s.saturation, s.log_poly as u8, s.smooth as u8
-        )
+        let v = self.view;
+        format!("{}\t{}\t{}\t{}\t{}", one_line(&self.group), one_line(&self.name), v.cr, v.ci, v.hw)
     }
 
-    pub fn from_line(line: &str) -> Option<Place> {
+    pub fn from_line(line: &str) -> Option<Location> {
+        let f: Vec<&str> = line.split('\t').collect();
+        let num = |i: usize| f.get(i)?.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+        let view = View { cr: num(2)?, ci: num(3)?, hw: num(4)?.abs() };
+        (view.hw > 0.0).then(|| Location { group: f[0].to_string(), name: f[1].to_string(), view })
+    }
+}
+
+/// The saved locations, in their order. Until there's a locations.tsv, the old programs'
+/// saved places are listed instead, in the group `OLD_PLACES_GROUP` (their order,
+/// coefficients and colouring are left behind, and so are their saved renders).
+pub fn load_locations() -> Vec<Location> {
+    let lines = |path: PathBuf| std::fs::read_to_string(path).ok();
+    let data = |s: &str| s.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect::<Vec<_>>();
+    if let Some(s) = lines(locations_path()) {
+        return data(&s).iter().filter_map(|l| Location::from_line(l)).collect();
+    }
+    let old = lines(old_places_path()).map(|s| data(&s)).unwrap_or_default();
+    old.iter()
+        .filter_map(|l| OldPlace::from_line(l))
+        .map(|p| Location { name: p.name, group: OLD_PLACES_GROUP.into(), view: p.view })
+        .collect()
+}
+
+pub fn store_locations(locations: &[Location]) -> std::io::Result<()> {
+    std::fs::create_dir_all(settings_dir())?;
+    let mut s = String::from("# Algebraic Fractals saved locations: group, name, re, im, half-width\n");
+    for l in locations {
+        s += &l.to_line();
+        s.push('\n');
+    }
+    std::fs::write(locations_path(), s)
+}
+
+/// A line of the old programs' places.tsv, or a waypoint line of their saved video
+/// paths (.path files): a view with an order, coefficients and colouring. Only read, to
+/// bring old places and paths in.
+pub struct OldPlace {
+    pub name: String,
+    pub view: View,
+    pub order: usize,
+    pub coefs: Coefs,
+    pub style: Style,
+}
+
+impl OldPlace {
+    /// Tab-separated: name, centre re, im, half-width, order, set, (unused: once a
+    /// minimum |c|, always 1), max, zero,
+    /// then the display style: colour by, n, max %, colormap, invert, shade; then zero_root;
+    /// then min %, gamma, cycles, shift, brightness, contrast, saturation; then log scale
+    /// for length/height; then smooth stars. (Columns were only ever added at the end, and
+    /// missing ones take their defaults.)
+    pub fn from_line(line: &str) -> Option<OldPlace> {
         let f: Vec<&str> = line.split('\t').collect();
         if f.len() < 9 {
             return None;
@@ -115,47 +172,18 @@ impl Place {
             saturation: num(22).unwrap_or(d.saturation),
         };
         let view = View { cr: num(1)?, ci: num(2)?, hw: num(3)?.abs() };
-        Some(Place { name: f[0].to_string(), view, order: int(4)?.clamp(1, 16) as usize, coefs, style })
-    }
-
-    /// Multi-line summary for hover text (it reads the saved render's header, if any).
-    pub fn info(&self) -> String {
-        let mut s = format!("centre {}\nhalf-width {:.4e}", fmt_complex(self.view.cr, self.view.ci), self.view.hw);
-        if let Ok(h) = crate::algf::read_header(place_render_path(&self.name)) {
-            s += &format!("\nsaved render: {} x {}, order {}, {}", h.width, h.height, h.order, h.coefs.describe());
-        }
-        s
+        Some(OldPlace { name: f[0].to_string(), view, order: int(4)?.clamp(1, 16) as usize, coefs, style })
     }
 }
 
-/// Where a saved place's render is kept: a "renders" folder next to the saved places,
-/// one .algf file per place (see crate::algf).
-pub fn place_render_path(name: &str) -> PathBuf {
-    places_path().with_file_name("renders").join(format!("{}.algf", file_safe(name)))
+/// Multi-line summary of a view for hover text.
+pub fn view_info(v: &View) -> String {
+    format!("centre {}\nhalf-width {:.4e}", fmt_complex(v.cr, v.ci), v.hw)
 }
 
 /// A name with the characters that file names can't contain replaced by _.
 pub fn file_safe(name: &str) -> String {
     name.chars().map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { '_' } else { c }).collect()
-}
-
-pub fn load_places() -> Vec<Place> {
-    std::fs::read_to_string(places_path())
-        .map(|s| s.lines().filter(|l| !l.starts_with('#')).filter_map(Place::from_line).collect())
-        .unwrap_or_default()
-}
-
-pub fn store_places(places: &[Place]) -> std::io::Result<()> {
-    let path = places_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let mut s = String::from("# Algebraic Fractals saved places: name, re, im, half-width, order, set, (unused), max, zero, colour by, n, max %, colormap, invert, shade, c0 = 0 allowed, min %, gamma, cycles, shift, brightness, contrast, saturation, log length/height\n");
-    for p in places {
-        s += &p.to_line();
-        s.push('\n');
-    }
-    std::fs::write(path, s)
 }
 
 /// "0.5+0.8i", "-1.2 - 3e-4i", "2i", "-i", "0.3" or "0.5, 0.8" -> (re, im)
@@ -335,8 +363,31 @@ mod tests {
         assert_eq!(parse_complex("abc"), None);
         let v = View { cr: -0.1, ci: 1.0 / 3.0, hw: 2.0 };
         assert_eq!(parse_complex(&complex_text(v.cr, v.ci)), Some((v.cr, v.ci)));
-        let p = Place { name: "spiral".into(), view: v, order: 5, coefs: Coefs { set: CoefSet::Powers2, max: 64, zero: false, zero_root: true }, style: Style::default() };
-        let q = Place::from_line(&p.to_line()).unwrap();
-        assert_eq!((q.name, q.view, q.order, q.coefs, q.style), (p.name, p.view, p.order, p.coefs, p.style));
+    }
+
+    #[test]
+    fn location_lines() {
+        let v = View { cr: -0.1, ci: 1.0 / 3.0, hw: 2.5e-9 };
+        let l = Location { name: "spiral\tarm".into(), group: "deep zoom".into(), view: v };
+        let back = Location::from_line(&l.to_line()).unwrap();
+        assert_eq!(back, Location { name: "spiral arm".into(), ..l });
+        assert_eq!(Location::from_line("g\tn\t0\t0\t0"), None);
+        assert_eq!(Location::from_line("g\tn\t0\tx\t1"), None);
+    }
+
+    /// Lines written by the old programs: the oldest (9 columns) and the newest (25).
+    #[test]
+    fn old_place_lines() {
+        let p = OldPlace::from_line("spiral\t1.9\t0.19\t0.16\t4\tints\t1\t32\t1").unwrap();
+        assert_eq!((p.name.as_str(), p.view, p.order), ("spiral", View { cr: 1.9, ci: 0.19, hw: 0.16 }, 4));
+        assert_eq!(p.coefs, Coefs { set: CoefSet::Ints, max: 32, zero: true, zero_root: false });
+        assert_eq!(p.style, Style::default());
+        let line = "lace\t-0.5\t0.25\t0.001\t5\tpow2\t1\t64\t0\tlog\t2\t99\tinferno\t1\t0\t1\t5\t1.5\t2\t0.25\t0.1\t1.2\t0.8\t1\t0";
+        let p = OldPlace::from_line(line).unwrap();
+        assert_eq!(p.coefs, Coefs { set: CoefSet::Powers2, max: 64, zero: false, zero_root: true });
+        let s = p.style;
+        assert_eq!((s.by, s.n, s.high, s.cmap, s.invert, s.shade), (ColourBy::Log, 2.0, 99.0, Colormap::Inferno, true, false));
+        assert_eq!((s.low, s.gamma, s.cycles, s.shift, s.brightness, s.contrast, s.saturation), (5.0, 1.5, 2.0, 0.25, 0.1, 1.2, 0.8));
+        assert_eq!((s.log_poly, s.smooth), (true, false));
     }
 }

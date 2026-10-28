@@ -1,10 +1,10 @@
 # Algebraic Fractals: specification for the combined program
 
-This document describes the new program completely: what it does, how it looks, how it behaves, how it's built and how it's shipped on GitHub. It merges the old explorer (`algfrac-gui.exe`) and the old video maker (`algfrac-video.exe`) into one app.
+This document describes the new program completely: what it does, how it looks, how it behaves, how it's built and how it's shipped on GitHub. It replaces the old explorer (`algfrac-gui.exe`) and the old video maker (`algfrac-video.exe`) with one app: an explorer with a slim toolbar, and a video window that opens from it.
 
 **How to read and edit it**
 - Edit anything. Delete what you don't want, add what's missing, and change any default.
-- **(New)** marks a feature the old programs didn't have. Everything else is a feature the old programs have, and the new one must keep.
+- **(New)** marks a feature the old programs didn't have. **(Changed)** marks one that works differently from the old programs. Everything else is a feature the old programs have, and the new one must keep.
 - **Decision** marks a choice I made that you may want to change. They're also collected in [section 13](#13-decisions-for-you).
 - The old programs, in `..\algfrac`, are the reference implementation. Where this spec says nothing about a detail, the new program behaves exactly like the old one. Where they disagree, this spec wins.
 - Section 3 lists the code that has already been copied over. Everything else will be written new.
@@ -17,11 +17,11 @@ This document describes the new program completely: what it does, how it looks, 
 2. [What gets shipped](#2-what-gets-shipped)
 3. [Code already carried over](#3-code-already-carried-over)
 4. [How the app is organised](#4-how-the-app-is-organised)
-5. [The window](#5-the-window)
-6. [Shared by both modes](#6-shared-by-both-modes)
-7. [Explore mode](#7-explore-mode)
-8. [Video mode](#8-video-mode)
-9. [Moving between the modes (New)](#9-moving-between-the-modes-new)
+5. [The main window](#5-the-main-window)
+6. [Shared by the explorer and videos](#6-shared-by-the-explorer-and-videos)
+7. [The explorer in detail](#7-the-explorer-in-detail)
+8. [The video window](#8-the-video-window)
+9. [How the explorer and videos work together](#9-how-the-explorer-and-videos-work-together)
 10. [The command-line tool](#10-the-command-line-tool)
 11. [Files on disk](#11-files-on-disk)
 12. [The engine: what must stay true](#12-the-engine-what-must-stay-true)
@@ -44,13 +44,26 @@ residual(X) = min |c0 + c1·X + c2·X² + … + cn·Xⁿ|
 
 over every polynomial up to a chosen **order** `n`, with coefficients from a chosen set up to a chosen **max coefficient** `M`. It also records which polynomial gives that minimum. Small residuals light up as stars. The result is star fields, lace, flowers and spirals that continue at every zoom level.
 
-The program has two **modes** in one window:
-- **Explore:** click and zoom through the plane, change the search settings, recolour instantly, save PNGs, and bookmark places with their renders.
-- **Video:** set a path of waypoints through the plane and render a smooth zoom video (`.mp4`), with the star density and the colouring changing smoothly along the way.
+The program is one window:
+- **The explorer** fills the window. Click and zoom through the plane, change the order, max coefficient, root density and resolution from a slim settings strip, save the view as a PNG, and save **locations** (a centre and half-width) into **groups**. A group is usually the waypoints of one future zoom video.
+- **Everything else is in popups** opened from the toolbar: the polynomial settings, the colours, the view's exact numbers, the saved locations, and the folders.
+- **Videos** are made in a **video window** that opens from the toolbar's Video menu. Its tabs set the path (start, finish and waypoints), the colouring (one for the whole video), the polynomial settings and the output. A strip of small, fast renders of every waypoint stays in view and updates as settings change. A video can be rendered at once, or saved as a **video project** and rendered later.
 
-A separate **command-line tool**, `algfrac.exe`, renders single images for scripts and very large renders.
+A separate **command-line tool**, `algfrac.exe`, renders single images for scripts and very large renders, and **(New, Decision)** renders saved video projects.
 
 **Platforms.** 64-bit Windows 10/11 is the main target. macOS 11+ (Apple silicon and Intel) is the second target. Linux should build from source, but no release builds are made for it.
+
+### 1.1 What changes from the old programs
+
+- **(Changed)** One window instead of two programs. The explorer is the main window; the old video maker's controls are in the video window.
+- **(Changed)** The explorer's side panel is gone. Only order, max coefficient, the two auto ticks, root density and resolution stay on screen. The rest is in toolbar popups.
+- **(Changed)** Saved places become **locations**: only a name, a group, a centre and a half-width. Going to one keeps your search settings and colouring. Locations don't keep a saved render (`.algf`). The old places are brought in as the group "Old places".
+- **(Changed)** A video has **one colouring for the whole video**. The old per-waypoint colouring, and the smooth blending of it between waypoints, are gone.
+- **(Changed)** The length and height scale can be fixed for the whole video, either from the waypoints or by hand.
+- **(Changed)** Views for waypoints are chosen in the explorer (from a group, or "Add the explorer's view"), not by picking on the video's preview image. The old pick box, pick zoom and drag-to-pick are gone.
+- **(Changed)** The old large frame preview is replaced by the **waypoint strip**: a small render of every waypoint, side by side, always visible.
+- **(New)** Video projects save every setting, so a video can be rendered later, from the app or the command line.
+- **(New)** A choice of output format: MP4, PNG frames, or both.
 
 ---
 
@@ -64,14 +77,15 @@ The repository is this folder. Its layout when finished:
 |---|---|
 | `README.md` | the GitHub front page: example pictures, what it is, download links, quick start, why the patterns look the way they do, further reading |
 | `LICENSE` (or `LICENSE-MIT` and `LICENSE-APACHE`) | the licence: **Decision**, see [13](#13-decisions-for-you) |
-| `docs/USER-GUIDE.md` | the user guide for both modes, merged from the old `README-GUI.md` and `README-VIDEO.md` |
+| `docs/USER-GUIDE.md` | the user guide, rewritten for the new layout from the old `README-GUI.md` and `README-VIDEO.md` |
 | `docs/DEVELOPER.md` | building, the source layout, how the search works, the library, file formats and tests, from the old developer `README.md` |
 | `docs/MAC.md` | first-run instructions for macOS (Gatekeeper), from the old `README-MAC.md` |
-| `docs/images/` | a few example pictures for the README, compressed (the program writes uncompressed PNGs of about 3 MB each) |
+| `docs/images/` | a few example pictures for the README, compressed |
 | `SPEC.md` | this document |
 | `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml` | the Rust package |
 | `src/` | the source (see [4.1](#41-source-layout)) |
 | `examples/density_check.rs` | checks density predictions against exact counts |
+| `tests/data/` | sample files written by the old programs (`places.tsv`, a `.path`), to check they still load |
 | `build.ps1`, `build-mac.sh` | release builds for Windows and macOS |
 | `.github/workflows/` | **(New, Decision)** automatic builds on GitHub (see [15.3](#153-releases-on-github)) |
 | `.gitignore` | `target/`, `dist/`, `dist-mac/`, `*.algf` |
@@ -96,15 +110,15 @@ These files were copied from the old programs, because they would have been rewr
 | `src/colour.rs` | `src/colour.rs` | turning a render into colours: `Style`, `ColourBy`, colormaps, `Stats`, percentiles, Smooth stars, `Scale` and `Levels` | none |
 | `src/density.rs` | `src/density.rs` | predicting the density of algebraic numbers before rendering (`Predictor`) | none |
 | `src/png.rs` | `src/png.rs` | a dependency-free PNG writer (uncompressed) | none |
-| `src/algf.rs` | `src/algf.rs` | reading and writing `.algf` render files | none |
-| `src/video/mod.rs` | `src/bin/algfrac-video/video.rs` | the zoom path (`ZoomPath`), smooth curves through the waypoints, fading, frame colouring, the held colour scale, downsampling, `simplest_quadratic`, and the `.mp4` writer (`Mp4Out`) | `algfrac::` became `crate::`; declares `pub mod reuse` |
+| `src/algf.rs` | `src/algf.rs` | reading and writing `.algf` render files (now used only by the command line) | none |
+| `src/video/mod.rs` | `src/bin/algfrac-video/video.rs` | the zoom path (`ZoomPath`), smooth curves through the waypoints, fading, frame colouring, the held colour scale, downsampling, `simplest_quadratic`, and the `.mp4` writer (`Mp4Out`) | `algfrac::` became `crate::`; declares `pub mod reuse`. **For one colouring per video:** `style_at` (blending the waypoints' colourings) and its test were removed, and `held_scale` takes one `Style` instead of one per waypoint. |
 | `src/video/reuse.rs` | `src/bin/algfrac-video/reuse.rs` | reusing renders between frames: the ladder, patch planning, cropping and averaging down | `algfrac::` became `crate::` |
-| `src/common.rs` | `src/bin/common/mod.rs` | `View`, saved places (`Place`, `places.tsv`, where renders go), number parsing and formatting, `choose_auto`, `allowed_text` | the egui widgets were left out (they'll be rewritten in the app); the parsing test moved here |
+| `src/common.rs` | `src/bin/common/mod.rs` | `View`, saved locations, number parsing and formatting, `choose_auto`, `allowed_text` | the egui widgets were left out (they'll be rewritten in the app). **For locations:** `Place` became `Location` (name, group, view) in `locations.tsv`, with `load_locations` and `store_locations`. The old place-line reader stays as `OldPlace::from_line`, only for bringing in old places and old `.path` files. `place_render_path` and `Place::info` were removed (`view_info` replaces the latter); `places_path` became `settings_dir`. Tests: `location_lines` and `old_place_lines`. |
 | `src/bin/algfrac.rs` | `src/main.rs` | the command-line tool | none |
 | `examples/density_check.rs` | `examples/density_check.rs` | density predictions against exact counts | none |
 | `.cargo/config.toml` | `.cargo/config.toml` | portable CPU target and the static C++ runtime for Windows | none |
 
-Not copied, to be rewritten: the two windows (`algfrac-gui.rs`, `algfrac-video/main.rs`) and the egui parts of `common/mod.rs`. The video maker's non-window logic (`Frames`, `auto_maxes`, `RenderKey`, `RenderMemory`, `SavedPath`, `make_video`, `frame_secs`) will be moved into the library as it's ported, mostly unchanged, so it can be tested without a window ([4.1](#41-source-layout)).
+Not copied, to be rewritten: the two windows (`algfrac-gui.rs`, `algfrac-video/main.rs`) and the egui parts of `common/mod.rs`. The video maker's non-window logic (`Frames`, `auto_maxes`, `RenderKey`, `RenderMemory`, `make_video`, `frame_secs`) will be moved into the library as it's ported, mostly unchanged, so it can be tested without a window ([4.1](#41-source-layout)). Its `SavedPath` becomes `VideoProject` ([11.3](#113-video-projects)).
 
 ---
 
@@ -114,127 +128,143 @@ Not copied, to be rewritten: the two windows (`algfrac-gui.rs`, `algfrac-video/m
 
 | file | contents |
 |---|---|
-| `src/lib.rs` | the `algfrac` library: `engine`, `colour`, `density`, `png`, `algf`, `common`, `video` |
+| `src/lib.rs` | the `algfrac` library: `engine`, `colour`, `density`, `png`, `algf`, `common`, `video`, `memory` |
 | `src/video/mod.rs`, `src/video/reuse.rs` | carried over (section 3) |
 | `src/video/frames.rs` | **to write:** `Frames` (everything that decides what the frames show), `auto_maxes`, `frame_secs` |
-| `src/video/paths.rs` | **to write:** `SavedPath` and the `.path` files |
-| `src/video/make.rs` | **to write:** `make_video`, the render loop, with progress reported through a callback instead of egui |
-| `src/memory.rs` | **to write:** `RenderKey` and `RenderMemory`, shared by both modes ([6.6](#66-renders-kept-in-memory)) |
-| `src/main.rs` | **to write:** the app: creates the window, owns the shared state, switches modes |
-| `src/app/explore.rs` | **to write:** Explore mode |
-| `src/app/video.rs` | **to write:** Video mode |
-| `src/app/widgets.rs` | **to write:** controls used by both modes: the coefficient-set rows, the Display section, the colormap strip, places menus |
-| `src/bin/algfrac.rs` | the command-line tool (carried over) |
+| `src/video/project.rs` | **to write:** `VideoProject` (every setting of a video) and its files, and bringing in old `.path` files |
+| `src/video/make.rs` | **to write:** `make_video`, the render loop, with progress reported through a callback instead of egui, so the app and the command line share it |
+| `src/memory.rs` | **to write:** `RenderKey` and `RenderMemory`, shared by the explorer and videos ([6.6](#66-renders-kept-in-memory)) |
+| `src/settings.rs` | **to write:** the remembered settings, `settings.tsv` ([6.8](#68-remembered-settings-new)) |
+| `src/main.rs` | **to write:** the app: creates the window, owns the shared state |
+| `src/app/explore.rs` | **to write:** the main window: toolbar, settings strip, image, status bar |
+| `src/app/popups.rs` | **to write:** the toolbar's popups: View, Polynomials, Colours, Save location, Locations, Folders |
+| `src/app/video.rs` | **to write:** the video window: its tabs, the waypoint strip, the bottom bar |
+| `src/app/widgets.rs` | **to write:** controls used in several places: the coefficient-set rows, the colour controls, the colormap strip, the location and group menus |
+| `src/bin/algfrac.rs` | the command-line tool (carried over; gains `video`, [10](#10-the-command-line-tool)) |
 
 The library stays free of GUI code, so the command line and the tests use it without a window. Only `src/main.rs` and `src/app/` use `eframe`/`egui`.
 
-### 4.2 Threads
+### 4.2 Windows and popups
 
-- The **UI thread** draws the window and never runs a search. A slow step, such as estimating a video's render time, runs on a background thread.
+- **The main window** is the explorer ([5](#5-the-main-window)).
+- **Popups** are small floating panels (`egui::Window`) over the explorer's image. Each opens and closes with its toolbar button (the button stays highlighted while it's open), has a × to close, can be dragged, and stays where it was put for the rest of the session. Several can be open at once. **Esc** closes the one most recently opened. They don't block anything: the explorer keeps working underneath.
+- **The video window** is a separate window of its own (an egui viewport) **(Decision)**, so it can be moved beside the explorer or onto a second screen. It's 1100 × 750 at first, resizable, at least 800 × 560, titled "Video: <project name>". At most one is open. The alternative is a large popup inside the main window.
+
+### 4.3 Threads
+
+- The **UI thread** draws the windows and never runs a search. A slow step, such as estimating a video's render time, runs on a background thread.
 - **Searches** run on worker threads, one per core (`std::thread::available_parallelism`), through `engine::render_axes`. Each job has a `cancel` flag and a `rows_done` counter for progress.
-- **Explore** has at most one render running. Starting a new one cancels the old one.
-- **Video** has at most one preview render, and at most one video render. A preview is cancelled when a new preview starts, or when Render video starts.
-- **(New) Explore and Video can be busy at the same time.** For example, a video renders while you explore. They share the cores, so each runs slower while the other is busy. While the video renders, its progress also shows in the top bar ([5.1](#51-layout)).
+- **The explorer** has at most one render running. Starting a new one cancels the old one.
+- **The video window** has at most one waypoint-strip job ([8.8](#88-the-waypoint-strip)), at most one frame preview ([8.4](#84-path-tab)), and at most one video render. The strip and the preview are cancelled when their settings change again, or when a video render starts.
+- **The explorer and a video render can run at the same time.** They share the cores, so each runs slower while the other is busy. While a video renders, its progress also shows in the explorer's toolbar ([5.1](#51-layout)).
 - Background threads ask for a repaint when they finish. While a job runs, the UI repaints every 100 ms for the progress bars (200 ms while a video renders).
 
-### 4.3 Shared state
+### 4.4 Shared state
 
-Owned by the app and used by both modes:
-- the saved places list (one list in memory, written to `places.tsv` whenever it changes, so the modes always agree);
+Owned by the app and used by the explorer and the video window:
+- the saved locations (one list in memory, written to `locations.tsv` whenever it changes);
 - the renders kept in memory ([6.6](#66-renders-kept-in-memory));
 - the density predictor (`Predictor`, which caches its sampled root densities);
 - the thread count;
+- the folders for images and videos ([6.7](#67-folders-and-file-names));
 - (New, Decision) the remembered settings ([6.8](#68-remembered-settings-new)).
-
-Each mode keeps its own state when you switch to the other one, and anything running carries on.
 
 ---
 
-## 5. The window
+## 5. The main window
 
 ### 5.1 Layout
 
 ```
-┌───────────────────────────────────────────────────────────────────────┐
-│ [ Explore ] [ Video ]                     video: frame 120 of 900, ~3 min left │  top bar
-├──────────────────┬────────────────────────────────────────────────────┤
-│ the mode's       │                                                    │
-│ controls         │              the mode's image                      │
-│ (scrolls)        │                                                    │
-│                  │                                                    │
-├──────────────────┴────────────────────────────────────────────────────┤
-│ status: the point under the mouse, its polynomial; messages           │  status bar
-└───────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│ ◀ Back  ⌂ Home  ⊖ Zoom out  ⟳ │ View… │ ★ Save location  Locations… │ ⬇ Save image │    │
+│ Polynomials…  Colours… │ Video ▾ │ ☰                    video: frame 120 of 900, ~3 min  │  toolbar
+├───────────────────────────────────────────────────────────────────────────────────────┤
+│ Order [ 3 ] ☐ auto   Max coefficient [ 12 ] ☐ auto   Root density [ 4 ] per 100 px²   │
+│ (predicted ~4.1)   Resolution [ 256 ▾ ]        ▓▓▓▓▓▓░░░ 62%  ~2 s left  [Cancel]     │  settings strip
+├───────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                       │
+│                                  the image                                            │
+│                                                                                       │
+├───────────────────────────────────────────────────────────────────────────────────────┤
+│ X = +0.5000… residual 1.2e-5  p(x) = 3x^2 - 2x + 1  length 6  height 3 │ Rendered 256x256 in 0.4 s │ status bar
+└───────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Top bar (New):** two tabs, **Explore** and **Video**. The mode that's showing is highlighted. On the right, while a video renders, a short progress note: "video: frame k of n, ~T left". Clicking it switches to Video.
-- **Controls:** a panel on the left, 340 px wide, not resizable, scrolling vertically. (The old explorer's was 300 px, the video maker's 350 px.)
-- **Image:** the rest of the window, background grey 16. The image is scaled to fit, keeping its aspect ratio, and centred.
-- **Status bar:** at the bottom. Each mode sets its own text ([7.10](#710-status-bar), [8.10](#810-status-bar)).
-- **Window:** 1400 × 900 at start, title "Algebraic Fractals". It opens in **Explore** mode. **Decision:** or reopen in the mode used last ([6.8](#68-remembered-settings-new)).
+The toolbar and the settings strip are each one row when the window is wide enough, and wrap onto a second row when it isn't.
+
+- **Toolbar** ([7.2](#72-toolbar)): navigation, the popups, saving, the Video menu and the ☰ menu. On the right, while a video renders: "video: frame k of n, ~T left". Clicking it shows the video window.
+- **Settings strip** ([7.3](#73-settings-strip)): order, max coefficient, their auto ticks, root density and resolution, then the render's progress.
+- **Image:** the rest of the window, background grey 16. The image is scaled to fit, keeping its aspect ratio, and centred. Popups float over it.
+- **Status bar:** one line. On the left, the hover text; on the right, the latest status message ([7.12](#712-status-bar)).
+- **Window:** 1200 × 900 at start, title "Algebraic Fractals". The old explorer's side panel is gone, so the image gets the whole width.
 - A window icon, and an icon for the `.exe` and the Mac app. **(New, Decision)** The old programs had none.
 
 ### 5.2 Keyboard
 
-Keys act only while no text box has the keyboard focus.
+Keys act only while no text box has the keyboard focus, and only in the window that has it.
 
-| key | mode | effect |
+| key | where | effect |
 |---|---|---|
-| Enter | Explore | Run: zoom into the yellow box |
-| Backspace | Explore | Back |
-| Esc | Video | cancel picking on the image |
-| Ctrl+1 / Ctrl+2 | both | switch to Explore / Video **(New)** |
+| Enter | explorer | Run: zoom into the yellow box |
+| Backspace | explorer | Back |
+| Home | explorer | Home view **(New)** |
+| Ctrl+S | explorer | Save image **(New)** |
+| Ctrl+L | explorer | Save location **(New)** |
+| Esc | explorer | close the most recently opened popup |
+| Ctrl+S | video window | save the video project **(New)** |
+| Esc | video window | close the video window (asks first if there are unsaved changes) |
 
 Enter in a text box does that box's own action (Go, Save, and so on), as described with each box.
 
 ---
 
-## 6. Shared by both modes
+## 6. Shared by the explorer and videos
 
 ### 6.1 Views and coordinates
 
 - A **view** is a centre `cr + ci·i` and a **half-width** `hw`.
-- In Explore, the image is square: it spans `cr ± hw` and `ci ± hw`.
-- In Video, `hw` is half the frame's **height**. A widescreen frame also spans `cr ± hw·16/9` horizontally.
+- In the explorer, the image is square: it spans `cr ± hw` and `ci ± hw`.
+- In a video, `hw` is half the frame's **height**. A widescreen frame also spans `cr ± hw·16/9` horizontally. So a location saved in the explorer is the same height in a video, with more at the sides.
 - Row 0 of a render is the top: the largest imaginary part.
 - The **home** view is centre 0, half-width 2.
 - **Typing a centre:** these forms are accepted: `0.5+0.8i`, `-1.2 - 3e-4i`, `2i`, `-i`, `0.3`, `0.5, 0.8`, `1.5E+2-2j`. Spaces are ignored, `j` counts as `i`, and `*i` as `i` (`common::parse_complex`). A half-width must be a finite number above 0.
 - **Showing a centre:**
   - in text boxes, the shortest exact form, such as `0.5-0.25i` (`complex_text`), so copying it out and back loses nothing;
-  - on labels, a fixed form with 12 decimals, such as `+0.500000000000 + 0.250000000000i` (`fmt_complex`);
-  - in the waypoint list, 4 decimals.
-- **Precision:** coordinates are 64-bit floats. Below a half-width of about 10⁻¹² × |centre|, neighbouring pixels can't be told apart and the image turns blocky. Video mode warns when a waypoint goes that deep (Explore's guide mentions it under troubleshooting).
+  - on labels and hovers, a fixed form with 12 decimals, such as `+0.500000000000 + 0.250000000000i` (`fmt_complex`);
+  - in the waypoint table and on the waypoint strip, 4 decimals.
+- **Precision:** coordinates are 64-bit floats. Below a half-width of about 10⁻¹² × |centre|, neighbouring pixels can't be told apart and the image turns blocky. The video window warns when a waypoint goes that deep, and the explorer shows the same warning in the status bar.
 
 ### 6.2 Search settings
 
-| setting | values | meaning |
-|---|---|---|
-| **Order** | 1–16 | the highest power of `x` |
-| **Max coefficient** | 1–1 000 000 | the largest allowed `|c|` |
-| **Coefficients** | integers; 1 and primes; Fibonacci numbers; odd numbers; triangular numbers; squares; cubes; powers of 2 | which sizes are allowed, each with either sign. Every set contains 1. In the dropdown, hovering a set shows its first members, e.g. `±1, ±2, ±3, ±5, ±7, ...` |
-| **allow 0** | on/off (default on) | whether a coefficient may be 0. Off means every power from 1 to the order appears. |
-| **0 can be a root** | on/off (default on) | whether `c0` may be 0 (polynomials `x·q(x)`), so that 0 itself lights up. Off: `c0` is never 0 and 0 sits in a dark hole. |
+| setting | values | meaning | where |
+|---|---|---|---|
+| **Order** | 1–16 | the highest power of `x` | explorer: settings strip; video: Polynomials tab |
+| **Max coefficient** | 1–1 000 000 | the largest allowed `|c|` | explorer: settings strip; video: per waypoint, Polynomials tab |
+| **Coefficients** | integers; 1 and primes; Fibonacci numbers; odd numbers; triangular numbers; squares; cubes; powers of 2 | which sizes are allowed, each with either sign. Every set contains 1. In the dropdown, hovering a set shows its first members, e.g. `±1, ±2, ±3, ±5, ±7, ...` | explorer: Polynomials popup; video: Polynomials tab |
+| **allow 0** | on/off (default on) | whether a coefficient may be 0. Off means every power from 1 to the order appears. | as Coefficients |
+| **0 can be a root** | on/off (default on) | whether `c0` may be 0 (polynomials `x·q(x)`), so that 0 itself lights up. Off: `c0` is never 0 and 0 sits in a dark hole. | as Coefficients |
 
-The **Allowed** line under the settings lists the coefficients in use, e.g. `0, ±1, ±2, ±3, ±5, ±8`. Lists of more than 10 are shortened to `±1, ±2, ±3, ±4, ±5, ±6, ... ±1000 (1000 values)`. With allow 0 on and 0 can be a root off, it adds "(c0 is never 0)" (`allowed_text`).
+The **Allowed** line lists the coefficients in use, e.g. `0, ±1, ±2, ±3, ±5, ±8`. Lists of more than 10 are shortened to `±1, ±2, ±3, ±4, ±5, ±6, ... ±1000 (1000 values)`. With allow 0 on and 0 can be a root off, it adds "(c0 is never 0)" (`allowed_text`).
 
-The "Max coefficient" box can be dragged. The drag speed is 1% of the value (at least 0.2 per pixel), so large values change proportionally. Order drags at 0.05 per pixel.
+The max coefficient box can be dragged. The drag speed is 1% of the value (at least 0.2 per pixel), so large values change proportionally. Order drags at 0.05 per pixel.
 
-### 6.3 Density prediction and auto
+### 6.3 Root density and auto
 
-How a star field looks depends mostly on how many algebraic numbers land per pixel. `density::Predictor` estimates this before rendering, in **algebraic numbers per 100 square pixels**, usually to within about 20%.
+How a star field looks depends mostly on how many algebraic numbers land per pixel. `density::Predictor` estimates this before rendering, in **algebraic numbers per 100 square pixels**, usually to within about 20%. In the program this is called the **root density**.
 
-`common::choose_auto` picks either the **order** or the **max coefficient** whose predicted density is closest to a **target density** (in log ratio). It keeps all the other settings, and it never needs more than `max_steps` of work per pixel.
-- **Explore** uses `max_steps` = 2·10⁴ (`AUTO_MAX_STEPS`), about 7 s at 256² or 2 minutes at 1024² on 12 cores. If the target needs more, an orange "Auto: …" note explains why it fell short.
-- **Video** uses no work limit, so it can go up to max coefficient 1 000 000. Its note then says "has too many polynomials to search".
+`common::choose_auto` picks either the **order** or the **max coefficient** whose predicted density is closest to the **target root density** (in log ratio). It keeps all the other settings, and it never needs more than `max_steps` of work per pixel.
+- **The explorer** uses `max_steps` = 2·10⁴ (`AUTO_MAX_STEPS`), about 7 s at 256² or 2 minutes at 1024² on 12 cores. If the target needs more, a ⚠ in the settings strip explains why it fell short.
+- **Videos** use no work limit, so they can go up to max coefficient 1 000 000. The note then says "has too many polynomials to search".
 - The first prediction for a new coefficient set takes up to about 70 ms. After that, each view takes about 3 ms.
 
-### 6.4 Colouring (the Display section)
+### 6.4 Colour controls
 
-A **style** (`colour::Style`) decides how a render is coloured. Changing it recolours instantly, without searching again. The Display section looks the same in both modes ([8.8](#88-display-colouring-per-waypoint) says which parts are per waypoint in Video).
+A **style** (`colour::Style`) decides how a render is coloured. Changing it recolours instantly, without searching again. The same controls appear in the explorer's Colours popup ([7.7](#77-colours-popup)) and the video window's Colour tab ([8.5](#85-colour-tab)), each with its own style.
 
 | control | range (default) | what it does |
 |---|---|---|
-| **Colour by** | 1 / residual^n (default); −log(residual); length (sum \|ci\|); height (max \|ci\|) | what's plotted. Power: brightness `(res/res_high)^(−n)`, clamped, stretched so `res_low` is black, computed in log space. Log: `−ln res` between the percentiles. Length/height: the polynomial's Σ\|ci\| or max\|ci\|, from the image's lowest to highest. |
+| **Colour by** | 1 / residual^n (default); −log(residual); length (sum \|ci\|); height (max \|ci\|) | what's plotted. Power: brightness `(res/res_high)^(−n)`, clamped, stretched so `res_low` is black, computed in log space. Log: `−ln res` between the percentiles. Length/height: the polynomial's Σ\|ci\| or max\|ci\|, from the image's lowest to highest (or the video's fixed scale, [8.5](#85-colour-tab)). |
 | **Colormap** | 23 maps (bone default) | classic: bone, gray, hot, copper, pink, spring, summer, autumn, winter, cool, jet, parula; modern: inferno, magma, plasma, viridis, turbo; rainbow/psychedelic: hsv, sinebow, neon, acid, candy, cosmic. hsv, sinebow, neon and acid are cyclic (their ends match). |
 | colormap strip | | a 14 px strip under the colormap, 256 samples with every setting below applied: left = darkest pixels, right = brightest. Redrawn only when the style changes. |
 | **n** | 0.05–20, log slider (1) | the sharpness exponent, for 1/residual^n and for shading |
@@ -250,15 +280,17 @@ A **style** (`colour::Style`) decides how a render is coloured. Changing it reco
 | **saturation** | 0 to 3 (1) | 0 = grey, above 1 = more vivid |
 | **colour cycles** | 1–50, log (1) | run through the colormap several times: bands like contour lines |
 | **colour shift** | 0 to 1 (0) | slide the colours along the colormap |
-| **Reset display** | button | everything back to the defaults |
+| **Reset colours** | button | everything back to the defaults |
 
 **Greyed out:** n, max %, min % and Smooth stars when colouring by length/height with shading off (they only act on the residual). Shade and Log scale unless colouring by length/height.
+
+**Layout:** the controls are in two groups, so the popup stays short: **What and which colours** (colour by, colormap and its strip, invert, shading, log scale) and **Adjust** (n, max %, min %, Smooth stars, brightness, contrast, gamma, saturation, cycles, shift). Each group is a collapsible header, both open at first.
 
 **Hover texts** (keep them, worded as in the old programs):
 - n: "Larger n makes the points near algebraic numbers sharper".
 - max %: "Brightness percentile that becomes full brightness: 99.5 saturates the brightest 0.5% of pixels. Lower = brighter image".
 - min %: "Brightness percentile that becomes black: 50 makes the darker half of the pixels black. Raise it to hide the background haze".
-- Smooth stars, gamma, saturation, colour cycles, colour shift, shading and log scale: as in `common/mod.rs`.
+- Smooth stars, gamma, saturation, colour cycles, colour shift, shading and log scale: as in the old `common/mod.rs`.
 
 **The order of operations** for each colour (`Style::colour`, carried over):
 1. invert;
@@ -271,67 +303,194 @@ A **style** (`colour::Style`) decides how a render is coloured. Changing it reco
 
 Recolouring uses lookup tables and all cores: 4–8 ms for 1024², about 45 ms for a 720p frame with Smooth stars.
 
-### 6.5 Saved places
+### 6.5 Locations and groups (Changed)
 
-A **place** is a named view, kept in `places.tsv` ([11](#11-files-on-disk)). Both modes use the same list.
+A **location** is a saved view: a **name**, a **group**, a **centre** and a **half-width**. Nothing else is kept. They're stored in `locations.tsv` ([11](#11-files-on-disk)).
 
-- **Saving (Explore):** saves the shown view's centre and half-width, and its **whole render**: every pixel's best polynomial and residual, as an `.algf` file in the `renders` folder. The name comes from the name box. An empty name uses the centre (`fmt_complex`). Saving under an existing name replaces that place and its render. The status line reports "Saved the place 'NAME' with its render (N MB)". If the render can't be written, the place is still saved, any half-written file is deleted, and the status says so.
-- **Saving (Video, "Save as place"):** adds the selected waypoint as a place named "<path name> <waypoint number>", without a render. (The waypoint's frame is widescreen, and Explore only opens square renders.)
-- **What a place line holds:** the line also holds an order, coefficients and colouring. Going to a place never uses them. They're stored because saved video paths use the same line format for their waypoints.
-- **Going to a place (Explore):** see [7.6](#76-saved-places-panel). The colouring stays as it is.
-- **Using a place (Video):** sets only the selected waypoint's centre and half-width.
-- **Hovering a place's name:** shows its centre, its half-width, and the saved render's size, order and coefficients, if it has one. Work this out only while hovering, since it reads the file's header.
-- **Deleting (Explore):** **x**, then **Delete** or **Keep**. Deleting removes the place and its render file.
-- **Sizes:** a saved render takes about 24 bytes per pixel at order 3: 25 MB at 1024², 400 MB at 4096².
+- **Groups** collect locations in an order. A group is usually the start, waypoints and finish of one zoom video, so the order matters: it's the order the video visits them. Every location is in exactly one group.
+- **Unsorted** is the default group. It always exists, even when empty.
+- **Saving** ([7.4](#74-save-location-popup)) adds the explorer's current view to a group, at the end.
+- **Going to a location** goes to its centre and half-width with the explorer's current search settings (auto included) and colouring, and renders. The view left behind goes onto the Back list.
+- **Hovering a location** shows its centre and half-width (`view_info`) and, if it's not the group's first, how far it zooms from the previous one in the group ("× 230 deeper than 'arm'").
+- **Old places:** until there's a `locations.tsv`, the old programs' `places.tsv` is read and its places listed in the group **Old places**, keeping their names and views. Their order, coefficients and colouring are left behind. Their saved renders (`renders\*.algf`) aren't used, and aren't deleted. `places.tsv` itself is never changed.
 
 ### 6.6 Renders kept in memory
 
-Every finished render is kept in a shared memory, so the same search never runs twice. This was in the old video maker; now Explore uses it too **(New for Explore)**.
+Every finished render is kept in a shared memory, so the same search never runs twice. This was in the old video maker; now the explorer uses it too **(New for the explorer)**.
 - **Key:** a render is filed under its order, its coefficients (with their max) and the exact bits of its sample points (`RenderKey`). A render with the same key is the same search.
 - **Size:** up to **3 GB**, least recently used dropped first, counting 8 bytes per axis value and residual, and 4 per coefficient. **(New)** Also count the colouring `Stats`, if they're kept with the render.
-- **Explore uses it for:**
-  - **Back**, which is instant when the earlier view's render is still there with the same settings. That replaces the old 30-render history.
+- **The explorer uses it for:**
+  - **Back**, which is instant when the earlier view's render is still there with the same settings.
   - **Refresh**, and changing a setting back again (e.g. order 3 → 4 → 3), which are instant.
-  - **Opening a saved place's render**, which is put into the memory too.
-- **Video uses it** as before:
-  - Preview renders, including the waypoints' frames rendered for the held colour scale, are kept and reused.
-  - **Render video** takes the waypoints' colour levels from memory where it can.
+  - **Going back to a location** you've already rendered with the same settings.
+- **The video window uses it for:**
+  - the waypoint strip and the frame preview, which are kept and reused;
+  - **Render** takes renders already in memory where they match (only full-size ones will, so mostly the frame preview's).
 - It's cleared when the program closes.
 
 ### 6.7 Folders and file names
 
-- **Images** (Explore's Save PNG) and **videos** (Video's output folder) default to the default save folder.
+- **Images** (Save image) and **videos** go to two folders, set in ☰ → **Folders…** ([7.10](#710-the--menu)). Each video project also keeps its own output folder, which starts as the videos folder ([8.7](#87-output-tab)).
 - **Decision:** the old programs used a `Results` folder above the program if there was one, otherwise the folder they were started from. For people downloading from GitHub, the new default is:
   - Windows: `Pictures\Algebraic Fractals` for images and `Videos\Algebraic Fractals` for videos;
   - macOS: `~/Pictures/Algebraic Fractals` and `~/Movies/Algebraic Fractals`.
 
   A `Results` folder above the program still wins, for the developer's own setup. The folders are created when the first file is saved.
-- Both folders are text boxes you can type any path into. **(New, Decision)** Add a **Browse…** button with a native folder picker (the `rfd` crate).
+- Each folder is a text box you can type any path into. **(New, Decision)** Each has a **Browse…** button with a native folder picker (the `rfd` crate).
 
 ### 6.8 Remembered settings (New)
 
-**Decision.** The old programs started from their defaults every time, apart from places and saved paths. The new one remembers between sessions, in `settings.tsv` next to `places.tsv` (`key<TAB>value` lines, unknown keys ignored):
-- the last mode;
-- Explore: the search settings, auto ticks, target density, resolution, zoom factor, Show zoom box, the style and the image folder. It reopens on the last view, re-rendered.
-- Video: the whole path and its settings, in `.path` format ([11](#11-files-on-disk)), as an unnamed "last session" path, plus the output settings and folder.
+**Decision.** The old programs started from their defaults every time, apart from places and saved paths. The new one remembers between sessions, in `settings.tsv` next to `locations.tsv` (`key<TAB>value` lines, unknown keys ignored):
+- the explorer: the search settings, the auto ticks, the target root density, the resolution, the zoom factor, Show zoom box, the style and the last view. It reopens there, re-rendered;
+- the group last saved to;
+- the two folders;
+- which popups were open (they reopen in their default places);
+- the video window: the project that was open, and whether the window was open. Unsaved changes are kept as a project named "(last session)" ([8.3](#83-projects-saving-and-opening)).
 
-**Reset all settings** (in a small menu on the top bar) goes back to the defaults in this spec.
+☰ → **Reset all settings** goes back to the defaults in this spec. It doesn't touch locations or saved video projects.
 
 ---
 
-## 7. Explore mode
+## 7. The explorer in detail
 
 ### 7.1 On start
 
-It shows the home view (−2 … 2), order 3, integer coefficients up to 12 with 0 allowed and 0 can be a root, resolution 256 × 256, zoom × 4, default colouring. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
+It shows the home view (−2 … 2), order 3, integer coefficients up to 12 with 0 allowed and 0 can be a root, resolution 256 × 256, zoom × 4, default colouring, no popups open. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
 
-### 7.2 Mouse on the image
+### 7.2 Toolbar
+
+Left to right, as icon-and-word buttons, with hover text for each:
+
+| button | effect |
+|---|---|
+| **◀ Back** (Backspace) | the previous view. The last 30 views are remembered. If that render is still in memory with the current settings, it shows instantly; otherwise it's rendered again (auto first works out its value for that view). Greyed when there's nothing to go back to. |
+| **⌂ Home** (Home key) | back to the home view |
+| **⊖ Zoom out** | half-width × max(zoom, 2), same centre |
+| **⟳ Refresh** | render the current view again with the current settings. Needed after changing the resolution ([7.3](#73-settings-strip)). |
+| **View…** | opens the View popup ([7.5](#75-view-popup)) |
+| **★ Save location** (Ctrl+L) | opens the Save location popup ([7.4](#74-save-location-popup)). Greyed until an image is shown. |
+| **Locations…** | opens the Locations popup ([7.8](#78-locations-popup)) |
+| **⬇ Save image** (Ctrl+S) | saves the shown image as a PNG straight away ([7.13](#713-saving-images)). Greyed until an image is shown. |
+| **Polynomials…** | opens the Polynomials popup ([7.6](#76-polynomials-popup)) |
+| **Colours…** | opens the Colours popup ([7.7](#77-colours-popup)) |
+| **Video ▾** | a menu ([7.9](#79-the-video-menu)) |
+| **☰** | a menu ([7.10](#710-the--menu)) |
+
+Run (zoom into the yellow box) has no button: it's Enter or a double-click on the image. **Decision:** add a **Run** button too, if you'd like one for mouse-only use.
+
+Back, Home, Zoom out, Run, Go and going to a location all add the view being left to the Back list, and clear the clicked target.
+
+### 7.3 Settings strip
+
+The only search settings on screen. Left to right:
+1. **Order:** number box (1–16) and an **auto** tick-box.
+2. **Max coefficient:** number box (1–1 000 000) and an **auto** tick-box. Only one of the two autos can be on: ticking one unticks the other. A box is greyed while its auto is on, and shows the value auto chose.
+   - Hover text for auto: "Choose this automatically, so that the view has the target root density (predicted before rendering). Only one can be automatic."
+3. **Root density:** a number box (0.01–1000, default 4), then "per 100 px²". It's the target for auto, so it's greyed while neither auto is on.
+   - After it, in grey: "(predicted ~4.1)", the predicted density of the view with the current settings, to 2 significant figures. Hover: "Estimated before rendering, from the number of allowed polynomials and where the roots of random polynomials lie. Usually within about 20%."
+   - When auto falls short, an orange **⚠** follows. Its hover is the note, e.g. "Auto: a max coefficient above 4200 would get closer, but is too slow for auto".
+4. **Resolution:** a dropdown of 128, 256, 384, 512, 768, 1024, 1536, 2048 and 4096, all square. Default 256. Hover: "Pixels across. Changing it doesn't re-render: press ⟳ Refresh or zoom in to use it."
+5. **Progress,** while rendering: a progress bar `NN%  ~Ts left` (from the rows finished so far) and **Cancel**. Cancel stops the render, keeps the old image, says "Cancelled", and doesn't re-render for the settings that were pending. While nothing renders, the space is empty.
+
+**When it re-renders by itself:**
+- Changing the order, the max coefficient or any setting in the Polynomials popup re-renders the current view. It waits until the value has stayed the same for **400 ms**, so dragging a number doesn't start a render for every step. It keeps the view.
+- Changing the resolution does **not** re-render, so you can explore at low resolution and press Refresh or zoom in to go high. **Decision:** or re-render at once.
+- **With an auto on,** the auto value is worked out again whenever its inputs change: the view, the resolution, the target, which auto is on, and the other settings. If that changes the order or coefficients, it re-renders (after the same pause).
+- Auto works from the view being *requested*, so a render in progress already has the right value.
+- **The old image stays on screen** until the new one is ready.
+
+### 7.4 Save location popup
+
+Opened by **★ Save location**. Small, near the button:
+- **Name:** a text box, focused when the popup opens, with the hint "name this view". An empty name uses the centre (`fmt_complex`).
+- **Group:** a dropdown of the groups, then **New group…**, which turns the dropdown into a text box for the new group's name. Default: the group last saved to (at first, Unsorted).
+- The view, in grey: `centre <fmt_complex>, half-width <hw:.4e>`.
+- **Save** (Enter): adds the location at the end of the group, closes the popup, and the status says `Saved 'NAME' in GROUP (location 4 of 4)`.
+- **Same name in the same group:** the Save button reads **Replace** and the location keeps its place in the group, with the new view. Names may repeat across groups.
+- Hover on Save: "Remember this view's centre and half-width. Going to it later keeps the search settings and colours you have then."
+
+### 7.5 View popup
+
+The exact numbers of the view and the zoom:
+- **Centre** and **Half-width** text boxes. They show the current view's exact values, and refill whenever the view changes.
+  - Typing a new value and pressing **Enter** or **Go** goes there. Go is greyed if the text can't be read.
+  - Red "can't read that number" when the text can't be read; grey "(edited, press Go)" when it differs from the current view.
+  - Hover: "Type a complex number, e.g. 0.5+0.8i, -1.2-3e-4i, 2i or 0.5, 0.8, then press Enter or Go" and "Distance from the centre to the edge of the image".
+  - **Copy** puts `centre, half-width` on the clipboard as text.
+- **Zoom ×:** slider 1–1000, log scale, default 4. The mouse wheel over the image changes it too.
+- `Next: <fmt_complex of the box's centre>` and `half-width <hw/zoom>` (4 significant figures, scientific).
+- **Show zoom box** tick-box (on).
+- A warning, in orange, when the half-width is below 10⁻¹² × |centre|: "That's beyond 64-bit precision: the image will look blocky".
+
+### 7.6 Polynomials popup
+
+The search settings that aren't in the strip, and what they mean:
+- **Coefficients** dropdown, **allow 0**, **0 can be a root** ([6.2](#62-search-settings)).
+- Grey lines:
+  - `Allowed: …`;
+  - `1.95e+07 polynomials per pixel, searched in ~3.10e+02 steps` (`Plan::brute_len`, `Plan::steps`), or the plan's error in red;
+  - `Predicted: ~4.1 algebraic numbers per 100 px² in this view`;
+  - in orange, if auto fell short: `Auto: <note>`.
+- Changes re-render as in [7.3](#73-settings-strip).
+
+### 7.7 Colours popup
+
+The colour controls of [6.4](#64-colour-controls), with one style for the whole explorer. Changes recolour the shown image at once. It's taller than the other popups; it opens on the right of the image so it covers less of it.
+
+### 7.8 Locations popup
+
+Everything about saved locations. It's a scrolling list of groups, each a collapsible header:
+
+```
+▾ Spiral dive (4)                         [🎬 Make video]  [⋯]
+     1  start           ↑ ↓  ✎  ⇄  ×
+     2  arm             ↑ ↓  ✎  ⇄  ×
+     3  inner arm       ↑ ↓  ✎  ⇄  ×
+     4  flower          ↑ ↓  ✎  ⇄  ×
+▸ Unsorted (2)
+▸ Old places (17)
+[ + New group ]
+```
+
+- **A location's row:** its number in the group, then its name as a button (shortened with "…" if too long). Click to go there ([6.5](#65-locations-and-groups-changed)). Hover shows its info. The row for the view the explorer is showing is highlighted.
+  - **↑ ↓** move it within the group (greyed at the ends).
+  - **✎** renames it in place (Enter to finish, Esc to cancel).
+  - **⇄** is a menu of the other groups, to move it to the end of one, and **New group…**.
+  - **×** asks "Delete 'NAME'?" with **Delete** and **Keep**.
+  - It can also be dragged to a new place in its group, or onto another group's header. **(Decision:** dragging as well as the buttons.)
+  - **Set to this view** (in the row's right-click menu) replaces its centre and half-width with the explorer's current view, keeping its name and place.
+- **A group's header:** its name and number of locations, then:
+  - **🎬 Make video:** opens the video window with a new project from this group ([9](#9-how-the-explorer-and-videos-work-together)). Greyed for a group of fewer than 2 locations, with the hover "A video needs at least 2 locations: a start and a finish".
+  - **⋯** menu: **Rename**, **Sort by depth** (widest first, so the video zooms in), **Reverse order**, **Delete group…** (asks, and deletes its locations too; Unsorted can't be deleted, only emptied).
+  - Collapsed or open is remembered for the session.
+- **+ New group:** asks for a name and adds an empty group at the end. Group names are unique.
+- **Empty:** "No saved locations yet. Find a view you like and press ★ Save location."
+- The groups are listed in the order they were made, with Unsorted first and Old places last.
+
+### 7.9 The Video menu
+
+- **Video window:** shows the video window with the project that was last open (or a new one, if none). Ticked while it's open.
+- **New video:** opens the video window with a new project ([8.1](#81-a-new-project)).
+- **New video from group ▸:** the groups with at least 2 locations. Same as the group's 🎬 Make video.
+- **Open video project ▸:** the saved projects, alphabetically, with "(last session)" first if there is one. Each entry has a small × to delete it (asks first). Then, if there are any, **Old paths ▸**: the old video maker's saved paths, to bring in ([11.4](#114-old-files-brought-in)).
+- **While a video renders:** "Rendering 'NAME': frame k of n" (greyed), and **Stop the render** (asks, then stops and saves what's done).
+
+### 7.10 The ☰ menu
+
+- **Folders…:** a small popup with the images folder and the videos folder: text boxes with **Browse…** ([6.7](#67-folders-and-file-names)).
+- **Show zoom box** (tick).
+- **Reset all settings** (asks first).
+- **User guide:** opens the guide on GitHub in the browser.
+- **About:** the version, the licence, and a link to the repository.
+
+### 7.11 Mouse on the image
 
 | action | effect |
 |---|---|
 | click | choose the centre of the next zoom (the yellow box moves there) |
 | double-click | choose the centre and Run at once |
-| mouse wheel | change the zoom factor: × 1.15 per notch (`1.15^(dy/40)`), kept within 1–1000 |
+| mouse wheel | change the zoom factor: × 1.15 per notch (`1.15^(dy/40)`), kept within 1–1000. The status bar briefly shows "zoom × 5.3". |
+| right-click | a menu: **Zoom in here**, **Centre here** (same half-width), **Save location here…** (the view centred here, at the current half-width), **Copy this point** (`complex_text` to the clipboard) **(New)** |
 | hover | the status bar shows the point, its residual, its polynomial, length and height |
 
 - **The zoom box:** yellow (255, 200, 40), 1.5 px. It's the next view's square, with a 12 px cross at its centre. Hidden by unticking **Show zoom box**.
@@ -339,191 +498,189 @@ It shows the home view (−2 … 2), order 3, integer coefficients up to 12 with
 - The texture uses nearest-neighbour sampling, so pixels stay sharp when enlarged.
 - Before the first render finishes, the image area shows "Rendering…".
 
-### 7.3 Search panel
+### 7.12 Status bar
 
-Controls, in order:
-1. **Order:** number box (1–16) and an **auto** tick-box.
-2. **Max coefficient:** number box (1–1 000 000) and an **auto** tick-box. Only one of the two autos can be on: ticking one unticks the other. A box is greyed while its auto is on.
-   - Hover text for auto: "Choose this automatically, so that the view has the target density of algebraic numbers (predicted before rendering). Only one can be automatic."
-3. **Target density:** shown only while an auto is on. A number box (0.01–1000, default 4), then "per 100 px²".
-4. **Coefficients**, **allow 0**, **0 can be a root** ([6.2](#62-search-settings)).
-5. **Resolution:** 128, 256, 384, 512, 768, 1024, 1536, 2048 or 4096, all square. Default 256.
+- **Left:** the hover text, or "Hover over the image to see each pixel's polynomial".
+- **Right,** in grey: the latest status message: `Rendered WxH in 1.23s`, `Saved <path>`, `Cancelled`, `Error: <message>`, and so on. The colouring `Stats` are computed when a render arrives.
 
-Grey lines under the controls:
-- `Allowed: …`.
-- `1.95e+07 polynomials per pixel, searched in ~3.10e+02 steps` (`Plan::brute_len`, `Plan::steps`), or the plan's error in red.
-- `Predicted: ~4.1 algebraic numbers per 100 px² in this view`, to 2 significant figures. Hover: "Estimated before rendering, from the number of allowed polynomials and where the roots of random polynomials lie. Usually within about 20%."
-- In orange, if auto fell short: `Auto: <note>`.
-- `Order and coefficient changes re-render this region automatically; resolution changes need Run or Refresh.`
+### 7.13 Saving images
 
-**When it re-renders by itself:**
-- Changing the order or any coefficient setting re-renders the current view. It waits until the value has stayed the same for **400 ms**, so dragging a number doesn't start a render for every step. It keeps the view.
-- Changing the resolution does **not** re-render, so you can explore at low resolution and press Refresh or Run to go high.
-- **With an auto on,** the auto value is worked out again whenever its inputs change: the view, the resolution, the target, which auto is on, and the other settings. If that changes the order or coefficients, it re-renders (after the same pause).
-- Auto works from the view being *requested*, so a render in progress already has the right value.
-
-### 7.4 View panel
-
-- **Centre** and **Half-width** text boxes. They show the current view's exact values, and refill whenever the view changes.
-  - Typing a new value and pressing **Enter** or **Go** goes there. Go is greyed if the text can't be read.
-  - Red "can't read that number" when the text can't be read; grey "(edited, press Go)" when it differs from the current view.
-  - Hover: "Type a complex number, e.g. 0.5+0.8i, -1.2-3e-4i, 2i or 0.5, 0.8, then press Enter or Go" and "Distance from the centre to the edge of the image".
-- **zoom ×:** slider 1–1000, log scale, default 4.
-- `Next: <fmt_complex of the box's centre>` and `half-width <hw/zoom>` (4 significant figures, scientific).
-- Buttons:
-  - **Run (zoom in)** (Enter): render the yellow box. With no click, it zooms into the current centre.
-  - **Refresh:** render the current view again with the current settings.
-  - **Back** (Backspace; greyed when there's nothing to go back to): the previous view. The last 30 views are remembered. If that render is still in memory with the current settings, it shows instantly; otherwise it's rendered again. (Auto first works out its value for that view.)
-  - **Zoom out:** half-width × max(zoom, 2), same centre.
-  - **Reset:** back to the home view.
-- **Show zoom box** tick-box (on).
-- **While rendering:** a progress bar `NN%  ~Ts left` (from the rows finished so far) and **Cancel**. Cancel stops the render, keeps the old image, says "Cancelled", and doesn't re-render for the settings that were pending.
-- **While opening a saved render:** "Opening the saved render (W x W)…" instead of the progress bar.
-- **The old image stays on screen** until the new one is ready.
-
-Run, Zoom out, Reset, Go and going to a place all add the view being left to the Back list, and clear the clicked target.
-
-### 7.5 Render finished
-
-The status line says `Rendered WxH in 1.23s`, or `Opened the saved render, WxH in 0.4s`. The colouring `Stats` are computed on arrival. Errors show as `Error: <message>`.
-
-### 7.6 Saved places panel
-
-- A name box (hint "name this view") and **Save**. Enter in the box saves. Save is greyed until an image is shown. Hover: "Remember this view's centre and half-width, and its render, so it opens again straight away without searching. Going to a place keeps the colouring you have. Saving with an existing name replaces it."
-- "None yet. Name the current view and press Save." when there are no places.
-- One row per place: a small **x** (delete), then the name as a button (shortened with "…" if too long). Click to go there. Hover shows the place's info ([6.5](#65-saved-places)).
-- **Going to a place with a saved render** (`renders/<name>.algf` exists, with a square, non-legacy header):
-  1. The order, coefficients and resolution switch to the ones in the file's header, so the controls match the picture.
-  2. Auto is turned off, with " (auto order / max coefficient turned off, to keep its settings)" added to the status.
-  3. The file is read on a background thread and checked to really be that view (`View::shown_by`: centre and half-width within 10⁻⁶ of the half-width).
-  4. If it doesn't match, or can't be read, the status says so and suggests Refresh.
-  5. The colouring is unchanged.
-- **Going to a place without a saved render:** goes to its centre and half-width with the current settings (auto included), and renders.
-
-**Decision:** adopting the saved render's settings is more than "location and half-width only". The alternative is to keep the current settings, use the saved render only when they match it, and search otherwise.
-
-### 7.7 Display panel
-
-[6.4](#64-colouring-the-display-section), with one style for the whole of Explore.
-
-### 7.8 Save panel
-
-- **Folder** text box ([6.7](#67-folders-and-file-names)).
-- **Save PNG** (greyed until an image is shown): writes the shown render at its full resolution with the current colouring. The status says `Saved <path>` or `Could not save <path>: <error>`.
+- **⬇ Save image** writes the shown render at its full resolution with the current colouring, to the images folder. The status says `Saved <path>` or `Could not save <path>: <error>`.
 - **File name:** `alg_o<order>_m<max><set tag>[_nz][_r0]_<re:+.8><im:+.8>i_hw<hw:.3e>_<px>px_<colour by>_<colormap>[_n<n>].png`
   - set tags: none for integers, `p` primes, `f` Fibonacci, `o` odd, `t` triangular, `s` squares, `c` cubes, `b` powers of 2;
   - `_nz` = 0 not allowed, `_r0` = c0 = 0 allowed;
   - `_n<n>` only when colouring by 1/residual^n;
   - e.g. `alg_o4_m12_+0.50000000+0.80000000i_hw7.500e-1_1024px_pow_inferno_n3.png`.
-- **(New, Decision)** Compress the PNG (zlib, via the `png` crate or `miniz_oxide`). The old writer stored it uncompressed, about 50 MB at 4096². Keep the carried-over uncompressed writer only if you'd rather not add a dependency.
+  - An existing file is never overwritten: `_2`, `_3`, … is added.
+- **(New, Decision)** The PNG is compressed (zlib, via the `png` crate or `miniz_oxide`). The old writer stored it uncompressed, about 50 MB at 4096². Keep the carried-over uncompressed writer only if you'd rather not add a dependency.
+- **Save image as…** (right-click on the button): the same, but asks for the file name and folder with a native save dialog (`rfd`).
 
-### 7.9 Help text
+### 7.14 Help
 
-At the bottom of the panel, in grey:
+Hovering the image for 2 s with nothing else to show, the status bar's left side cycles through short tips:
 
 ```
-Click: choose the next centre
-Double-click: zoom in there now
-Mouse wheel: change zoom factor
-Enter: Run   Backspace: Back
-Hover: shows that pixel's polynomial
+Click: choose the next centre    Double-click: zoom in there now
+Mouse wheel: change zoom factor    Right-click: more
+Enter: Run   Backspace: Back   Ctrl+L: save location   Ctrl+S: save image
 ```
-
-### 7.10 Status bar
-
-- **Line 1:** the hover text, or "Hover over the image to see each pixel's polynomial".
-- **Line 2,** in grey: the latest status message.
 
 ---
 
-## 8. Video mode
+## 8. The video window
 
-### 8.1 On start
+### 8.1 A new project
 
-The path zooms from the home view into the flower around (1 + i√2)/3, a root of 3x² − 2x + 1:
-- **Waypoints:** start: centre 0, half-width 2; target: centre 1/3 + (√2/3)i, half-width 0.002. Both have auto max coefficient on (initial value 12, replaced by auto straight away) and default colouring.
-- **Path:** zoom per frame 1.01; pan speed 1% per frame.
-- **Search:** order 3, integers, 0 allowed, 0 can be a root, target density 4. Reuse on, coefficient steps medium, fade on, hold the colour scale off.
-- **Output:** 16:9, 1280 × 720, no smoothing, 30 fps, quality high, file name `zoom`, PNG frames off.
-- **Path name:** "my zoom". Mark the waypoints on.
+A **video project** is every setting of one video: the path, the colouring, the polynomial settings and the output. The video window always shows one project.
 
-The start's frame is previewed straight away.
+A new project starts as:
+- **From a group** ([9](#9-how-the-explorer-and-videos-work-together)): the group's locations, in order, as the waypoints: the first is the start, the last the finish. The project is named after the group.
+- **Otherwise** ("New video"): the start is the home view (centre 0, half-width 2), and the finish is the explorer's current view. If the explorer is at the home view, the finish is the flower around (1 + i√2)/3, a root of 3x² − 2x + 1: centre 1/3 + (√2/3)i, half-width 0.002. Named "my zoom".
+- **Either way:**
+  - every waypoint's max coefficient on auto, pan speed 1% per frame, keep flower size off;
+  - zoom per frame 1.01;
+  - the order, coefficient set, allow 0, 0 can be a root and target root density copied from the explorer;
+  - the colouring copied from the explorer;
+  - reuse on, coefficient steps medium, fade on, steady brightness off, length/height scale fixed from the waypoints;
+  - output: 16:9, 1280 × 720, no smoothing, 30 fps, quality high, MP4, file name = the project name, the videos folder.
 
-### 8.2 Waypoints panel
+The waypoint strip starts rendering straight away.
 
-**The list:** one selectable row per waypoint: `1. Start: 0.0000+0.0000i, hw 2.00e0, max 6`, then `2. Waypoint: …`, and the last is `N. Target: …`. Hover: "Edit this waypoint and preview its frame". Clicking selects it, stops picking, and previews **its frame**: the one frame where the video shows it exactly.
+### 8.2 Layout
 
-**Buttons:**
-- **Insert waypoint:** adds a waypoint halfway (in frames) along the segment after the selected one (before it, if the target is selected). It's placed where the video already passes, with that frame's colouring, rounded max coefficient and pan speed. Its auto is on only if both ends' are, and its segment keeps the flower size if the old segment did. The video doesn't change until you move it. It becomes selected.
-- **Add at end:** a new target after the last: a copy of it (view, colouring, max coefficient, auto, pan speed, keep flower size). It becomes selected. Hover: "Add a new target after the last waypoint, a copy of it. Then move it with Pick on image."
-- **Delete** (greyed with only 2 waypoints): removes the selected one. The segments either side merge, with the earlier one's pan speed and flower setting.
-- **Reverse:** runs the whole path backwards (waypoints, pan speeds, flower settings, max coefficients, autos, colourings). The same waypoint stays selected.
+```
+┌ Video: Spiral dive ──────────────────────────────────────────────────────────────────┐
+│ Project [ Spiral dive      ]  [Save] [Save as…] [Open ▾] [New]        ● unsaved     │  project bar
+│ [ Path ] [ Colour ] [ Polynomials ] [ Output ]                                       │  tabs
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│   the tab's controls (scrolls)                                                       │
+│                                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│  ┌────────┐  12 s  ┌────────┐  8 s  ┌────────┐  20 s  ┌────────┐                     │
+│  │        │ ─────▶ │        │ ────▶ │        │ ─────▶ │        │                     │  waypoint strip
+│  └────────┘        └────────┘       └────────┘        └────────┘                     │  (always shown)
+│  1 Start           2 arm            3 inner arm       4 Finish                       │
+│  hw 2.0  max 6     hw 0.03  max 41  hw 4e-4 max 900   hw 2e-6 max 31 000             │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│ 1 340 frames · 44.7 s at 30 fps · 1280 x 720 · ~150 MB · ~25 min     [ ● Render now ] │  bottom bar
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-**Saving and opening paths:**
-- A **name** box (default "my zoom"), **Save path** (replaces a saved path of the same name; an empty name says "Give the path a name first"), and an **Open…** dropdown listing the saved paths alphabetically ("No saved paths yet" if none).
-- A path saves every waypoint with everything set at it (view, max coefficient and auto, pan speed, keep flower size, colouring), plus zoom per frame, target density, fade, reuse, coefficient steps, hold the colour scale, order and coefficients.
-- Opening one replaces everything those cover, shares the first waypoint's whole-video colouring choices with all the waypoints ([8.8](#88-display-colouring-per-waypoint)), and selects the start.
-- Status: `Saved the path 'NAME' (N waypoints)`, `Opened the path 'NAME' (N waypoints)`, or the error.
-- **(New, Decision)** A **Delete** item for saved paths. The old program couldn't delete them except by deleting the file.
+### 8.3 Projects: saving and opening
 
-**The selected waypoint:**
-- **Centre** and **Half-width** text boxes. Changes apply as you type, as soon as the text can be read. Red "can't read that centre or half-width" while it can't. Hover: "Half the frame's height (the explorer's half-width). Widescreen frames show more at the sides."
-- **Max coefficient:** a number box (1–1 000 000) and **auto** (default on).
-  - The box is greyed while auto is on.
-  - If the segment *before* this waypoint keeps the flower size, the box is greyed and "keeps the flower size from <i>" replaces the auto tick-box.
-  - Hovers: "Choose the max coefficient that gives this waypoint's view the target density of algebraic numbers (see Search). Along a zoom in it never falls." and "The frames between waypoints follow a smooth curve through their max coefficients".
-  - An orange `Auto: <note>` appears under it when auto fell short.
-- **Pick on image** (a toggle, labelled "Picking: click or drag" while on): see [8.7](#87-the-image-and-picking).
-- **Zoom in x2** / **Out x2:** halve or double the half-width.
-- **Centre on flower:** moves the centre exactly onto the simplest quadratic number within half a frame height of it (`video::simplest_quadratic`, heights up to 1 000 000). That's the centre of the largest flower there. The status says `Waypoint 3 centred on <complex_text>, a root of 3x² - 2x + 1`, or "No quadratic number near waypoint 3 (it's too close to the real axis?)".
-- **from a saved place…** dropdown: sets the waypoint's centre and half-width only. Its colouring and max coefficient stay. Hovering an entry shows the place's info. With no places it shows "No saved places yet: save some in Explore".
-- **Save as place:** [6.5](#65-saved-places).
-- **(New)** **Open in Explore:** [9](#9-moving-between-the-modes-new).
+The **project bar**, at the top of the window:
+- **Project:** a text box with the project's name. It's also the file name the project saves under.
+- **Save** (Ctrl+S): saves under the name, replacing a saved project of the same name. An empty name says "Give the project a name first". Status: `Saved the project 'NAME'`.
+- **Save as…:** asks for a new name, then saves (asking before replacing one).
+- **Open ▾:** the saved projects, alphabetically, each with a × to delete it (asks first); then **Old paths ▸** ([11.4](#114-old-files-brought-in)). Opening one replaces the window's project.
+- **New ▾:** **Blank** ([8.1](#81-a-new-project)) or **From group ▸**.
+- **● unsaved** shows while the project has changes since it was last saved or opened.
+- **Leaving a project with unsaved changes** (Open, New, closing the window, or the explorer's 🎬 Make video): asks "Save changes to 'NAME'?" with **Save**, **Don't save** and **Cancel**. **(Decision:** or keep it silently as "(last session)".)
+- On quitting the program, an unsaved project is kept as "(last session)", so nothing is lost ([6.8](#68-remembered-settings-new)).
 
-**The segment to the next waypoint** (shown unless the target is selected):
-- **Pan speed to N:** 0.01–50 % of the frame height per frame (default 1%). Hover explains that zooming and panning happen together, and the segment takes whichever needs more frames.
-- **Keep flower size to N:** see [8.4](#84-the-max-coefficient).
-- Grey: `To waypoint N: <frames> frames (<duration>)`.
+Projects are saved in the settings folder ([11.3](#113-video-projects)), so they're listed wherever the program runs. **Export…** and **Import…** in the Open menu copy a project file to or from anywhere, to move it to another computer or share it.
+
+### 8.4 Path tab
+
+**The waypoint table:** one row per waypoint, in order. The selected row is highlighted, and so is its thumbnail in the strip.
+
+| # | name | centre | half-width | to the next one: pan speed | keep flower size | frames (time) | |
+|---|---|---|---|---|---|---|---|
+| 1 | Start | text box | text box | 1% | ☐ | 360 (12 s) | ↑ ↓ × |
+| 2 | arm | … | … | … | … | … | ↑ ↓ × |
+| 3 | Finish | … | … | | | | ↑ ↓ × |
+
+- **#:** the waypoint's number. The first is labelled Start and the last Finish, whatever their names.
+- **Name:** the location's name it came from, or "waypoint N". Editable. It's only a label.
+- **Centre** and **half-width:** text boxes; changes apply as you type, as soon as the text can be read. Red while they can't. Hover on half-width: "Half the frame's height (the explorer's half-width). Widescreen frames show more at the sides."
+- **Pan speed** to the next waypoint: 0.01–50 % of the frame height per frame (default 1%). Hover: "Zooming and panning happen together. The segment takes whichever needs more frames: zooming at the zoom per frame, or panning at this speed."
+- **Keep flower size** to the next waypoint: see [8.6](#86-polynomials-tab).
+- **Frames (time):** the segment's frames and their duration at the video's frame rate.
+- **↑ ↓** move the waypoint (greyed at the ends); **×** deletes it (greyed with only 2). The segments either side of a deleted waypoint merge, with the earlier one's pan speed and flower setting.
+- Clicking a row selects it.
+
+**Buttons under the table:**
+- **Add the explorer's view:** a new waypoint after the selected one (or at the end, if the finish is selected), with the explorer's current view, auto max coefficient, default pan speed. It becomes selected.
+- **Set to the explorer's view:** replaces the selected waypoint's view with the explorer's.
+- **Show in the explorer:** the explorer goes to the selected waypoint's view (the frame's height becomes the explorer's square), with the explorer's own settings. The main window comes to the front.
+- **Insert halfway:** adds a waypoint halfway (in frames) along the segment after the selected one (before it, if the finish is selected). It's placed where the video already passes, with that frame's rounded max coefficient and pan speed. Its auto is on only if both ends' are, and its segment keeps the flower size if the old segment did. The video doesn't change until you move it.
+- **Centre on flower:** moves the selected waypoint's centre exactly onto the simplest quadratic number within half a frame height of it (`video::simplest_quadratic`, heights up to 1 000 000). That's the centre of the largest flower there. Status: `Waypoint 3 centred on <complex_text>, a root of 3x² - 2x + 1`, or "No quadratic number near waypoint 3 (it's too close to the real axis?)".
+- **Reverse:** runs the whole path backwards (waypoints, pan speeds, flower settings, max coefficients, autos). The same waypoint stays selected.
+- **Replace with a group ▸:** replaces all the waypoints with a group's locations, keeping every other setting.
+- **Save as a group:** saves the waypoints as locations in a new group, named after the project (with " 2", " 3", … added if that group exists). Status: `Saved 4 locations in the group 'Spiral dive'`.
 
 **For the whole video:**
-- **Zoom per frame:** × 1.001–4 (default 1.01, 3 decimals). Hover: "How much each frame magnifies the last (for the whole video). 1.01 is slow and smooth, 1.05 is quick."
+- **Zoom per frame:** × 1.001–4 (default 1.01, 3 decimals). Hover: "How much each frame magnifies the last. 1.01 is slow and smooth, 1.05 is quick."
 - An orange warning if any waypoint's half-width is below 10⁻¹² of its centre's size: "That's beyond 64-bit precision: the deepest frames will look blocky".
 
-### 8.3 How the path moves
+**Look at a frame (Decision, default on):** the strip only shows the waypoints. To check the frames in between (fades, the max coefficient between waypoints), the Path tab ends with:
+- a **frame** slider over the whole video, with **|<** and **>|**, and the frame's time (`0:12.4`);
+- that frame, rendered exactly as the video will render it (patch windows with reuse, fades, smoothing and the colour scale), at twice the strip's thumbnail size;
+- in grey: `Frame k: centre <fmt_complex>, half-width 1.2345e-3, max coefficient 43.6 (fading from 41 to 46: 52%), rendered in 0.42 s`;
+- it re-renders 400 ms after the frame or anything that decides it changes; colour changes only recolour. Its render time calibrates the render-time estimate ([8.9](#89-the-bottom-bar-and-rendering)).
 
-This is carried over in `video::ZoomPath`. It must stay exactly as it is, since saved paths and the tests depend on it.
-- **Frames per segment:** each segment from view `(c0, h0)` to `(c1, h1)` has `steps = ceil(max(|ln(h0/h1)| / ln(rate), P / s))` frames, at least 1. `s` is the segment's pan speed, and `P` the pan in frame heights: `|c1 − c0| · |ln(h0/h1)| / 2|h0 − h1|`, or `|c1 − c0| / 2h` for a pure pan (equal half-widths, to within 10⁻⁶).
-- **Within a segment:** frame `j` has half-width `h0·(h1/h0)^(j/steps)`. The centre is `c1 + (c0 − c1)·(h − h1)/(h0 − h1)`, or linear in `j` for a pure pan. So the zoom is steady, the next waypoint stays put on screen as the view closes in on it, and the centre crosses the screen at a steady speed.
-- **Waypoints:** each one is shown exactly in one frame (`stop_frame(i)`). The total is `Σ steps + 1` frames.
+### 8.5 Colour tab
 
-### 8.4 The max coefficient
+**One colouring for the whole video (Changed).** The colour controls of [6.4](#64-colour-controls), applied to every frame. The old per-waypoint settings and their blending between waypoints are gone. Changes recolour the waypoint strip (and the frame preview) at once, without searching again.
 
-- **At each waypoint**, it's set by hand or by **auto**.
-- **What auto does** (`auto_maxes`, to be moved into the library unchanged):
-  - It runs `choose_auto` on the waypoint's frame region at the video's resolution, with no work limit.
-  - Along a segment that zooms in, the result is raised to at least the previous waypoint's value. Along a zoom out, it's lowered to at most it.
-  - It's worked out again whenever its inputs change: the views, which waypoints have auto, the hand-set values, the flower settings, the order, the coefficient set, the target, the resolution and the shape.
-- **Keep flower size** (per segment): the waypoint at the end of such a segment gets `keep_flower(previous max, previous view, this view)`: the previous max times the zoom. That holds whether its auto is on or not. If that max can't be searched, the note says so.
+Buttons at the top:
+- **Copy the explorer's colours:** replaces this colouring with the explorer's.
+- **Use these colours in the explorer:** the other way round.
+
+**Colour scale for the whole video.** A star field's brightness percentiles and its range of lengths and heights change from frame to frame, so a colouring that's right at one waypoint can drift. Two settings fix that:
+
+- **Steady brightness** (on/off, **Decision:** default off): each waypoint's frame is rendered on its own, and its brightness percentiles (at max % and min %) are measured. Every frame then uses percentiles that move steadily from one end of its segment to the other, instead of its own. Hover: "Stops the brightness flickering as stars appear and leave. The percentiles are measured at the waypoints and change steadily between them." (`video::held_scale`, carried over.) Only for colouring by residual, or by length/height with shading on.
+- **Length and height scale** (shown when colouring by length or height):
+  - **Each frame its own:** each frame spreads the colormap from its own lowest length/height to its highest (as in the explorer).
+  - **Fixed from the waypoints** (default): one range for the whole video, from the lowest value at any waypoint to the highest (`held_scale`), so a given length has the same colour in every frame. The range in use is shown in grey: `lengths 3 to 1 840, from the waypoints`.
+  - **Fixed by hand:** **from** and **to** number boxes (1–10⁹, log drag) for the length (when colouring by length) or the height (by height). They start as the range from the waypoints. A **Measure** button puts the waypoints' range back in. Values outside the range take the colormap's end colours.
+  - Hover: "Fixing the scale gives each length the same colour throughout the video, so colours don't shift as you zoom."
+
+**How the waypoints' levels are measured:** for the waypoint strip, from the thumbnails themselves. For the frame preview and the video, from each waypoint's frame at the video's full resolution, rendered first when the video starts (and for the preview, when steady brightness or a fixed-from-the-waypoints scale is on). The two can differ a little, so the strip's brightness is a close guide, not exact. The levels are cached (the 64 most recent) under their order, coefficients and frame jobs.
+
+### 8.6 Polynomials tab
+
+**For the whole video:**
+- **Order:** 1–16.
+- **Coefficients**, **allow 0**, **0 can be a root:** as in [6.2](#62-search-settings). `Allowed: …` uses the start's max coefficient.
+- **Root density:** 0.01–1000 per 100 px² of video (default from the explorer, 4). Hover: "The density of algebraic numbers that auto aims for at the waypoints. Auto picks whatever max coefficient that needs, however slow: check the render time."
+- **Copy the explorer's settings:** the order, coefficients and root density from the explorer.
+
+**The max coefficient at each waypoint:** a table, one row per waypoint:
+
+| # | name | max coefficient | auto | note |
+|---|---|---|---|---|
+| 1 | Start | 6 | ☑ | |
+| 2 | arm | 41 | ☑ | |
+| 3 | inner arm | 900 | ☐ | |
+| 4 | Finish | 31 000 | ☑ | keeps the flower size from 3 |
+
+- **Max coefficient:** a number box (1–1 000 000), greyed while auto is on (it shows auto's value).
+- **Auto** (default on): "Choose the max coefficient that gives this waypoint's view the target root density. Along a zoom in it never falls."
+- If the segment *before* the waypoint keeps the flower size, the box and the tick are greyed and the note says "keeps the flower size from <i>".
+- **Note:** in orange, auto's note if it fell short.
+- **Auto everywhere:** turns auto on at every waypoint.
+- Hover on the table: "The frames between waypoints follow a smooth curve through these values."
+
+**How the max coefficient moves** (carried over):
+- **Auto** (`auto_maxes`, to be moved into the library unchanged):
+  - runs `choose_auto` on the waypoint's frame region at the video's resolution, with no work limit;
+  - along a segment that zooms in, the result is raised to at least the previous waypoint's value; along a zoom out, it's lowered to at most it;
+  - is worked out again whenever its inputs change: the views, which waypoints have auto, the hand-set values, the flower settings, the order, the coefficient set, the target, the resolution and the shape.
+- **Keep flower size** (per segment, set in the Path tab): the waypoint at the end of such a segment gets `keep_flower(previous max, previous view, this view)`: the previous max times the zoom. That holds whether its auto is on or not. If that max can't be searched, the note says so. Hover: "Grow the max coefficient with the zoom, so the dark flower around a quadratic number stays the same size on screen while the stars around it get denser."
 - **Between waypoints** (`max_at`): a monotone cubic curve (PCHIP, Fritsch–Carlson) through the waypoints' `ln M` against frame number. Between two waypoints `M` rises by the same factor every frame, and it never overshoots.
-- **Fractional values and fading:** `M` is fractional between waypoints, but only whole coefficients exist.
-  - **Fade in new coefficients** on: a frame is rendered at the two values either side and cross-fades them, so new stars fade in.
-  - Without reuse, those values are members of the coefficient set (`fade_between`). With reuse, they're rungs of the ladder (`rung_between`).
-  - A frame exactly on a value needs one render.
-  - Fading off: the nearer value is used.
-- **Cross-fades** are done in display brightness (8-bit values), not linear light, so new stars brighten at a steady rate.
 
-### 8.5 Search panel
-
-- **Order:** 1–16 (default 3).
-- **Target density:** 0.01–1000 per 100 px² of video (default 4). Hover: "The density of algebraic numbers that auto aims for at the waypoints. Auto picks whatever max coefficient that needs, however slow: check the render time."
-- **Coefficients**, **allow 0**, **0 can be a root:** as in [6.2](#62-search-settings). The max is per waypoint, not here.
-- **Allowed:** `allowed_text`, using the start's max coefficient.
-- **Reuse renders between frames** (default on). Hover: "Render each part of the plane once, finely enough for several consecutive frames, and make those frames by averaging it down: several times faster, and anti-aliased. The max coefficient then moves in steps … Untick to render every frame separately."
+**Rendering choices:**
+- **Reuse renders between frames** (default on). Hover: "Render each part of the plane once, finely enough for several consecutive frames, and make those frames by averaging it down: several times faster, and anti-aliased. The max coefficient then moves in steps. Untick to render every frame separately."
 - **Coefficient steps** (only with reuse): fine / **medium** / coarse.
   - Each step allows about 13% / 28% / 65% more polynomials (`g` = 0.125 / 0.25 / 0.5).
   - Each option is labelled with both percentages for the current order, e.g. "medium: 28% more polynomials (max +6.4%)".
 - **Fade in new coefficients** (default on).
-- **Auto everywhere:** turn auto on at every waypoint.
+  - On: a frame between two allowed max coefficients is rendered at both and cross-fades them, so new stars fade in. Without reuse, those values are members of the coefficient set (`fade_between`); with reuse, they're rungs of the ladder (`rung_between`). A frame exactly on a value needs one render.
+  - Off: the nearer value is used.
+  - Cross-fades are done in display brightness (8-bit values), not linear light, so new stars brighten at a steady rate.
+- Grey: the deepest waypoint's `polynomials per pixel, searched in ~N steps`.
 
 **Reusing renders** (carried over in `video::reuse`). The algorithm must not change:
 - **The ladder:** every member of the set while they're more than `e^(g/(n+1))` apart, then values about that far apart, plus the waypoints' own values.
@@ -532,108 +689,71 @@ This is carried over in `video::ZoomPath`. It must stay exactly as it is, since 
 - **Making a frame:** crop the patch to the frame; take histogram percentiles (`Stats::binned`); colour; average down in linear light (box filter weighted by overlap); then cross-fade.
 - **Memory:** a patch is dropped after its last frame. Up to two patches are in memory at a time.
 
-### 8.6 Output panel
+### 8.7 Output tab
 
 | control | values (default) | notes |
 |---|---|---|
-| **Shape** | 16:9 (widescreen) (default), square | |
+| **File format** **(New)** | **MP4 video** (default); **PNG frames**; **MP4 and PNG frames** | MP4: H.264 in an `.mp4` file, plays everywhere. PNG frames: a folder of numbered, lossless PNGs (`frame_00000.png`, …), for editing in other software; large (a few MB each at 720p, compressed). Both: the two together. **Decision:** other formats (GIF, WebM/AV1, H.265) would each need a new encoder library; GIF suits star fields badly (256 colours). |
+| **Shape** | 16:9 (widescreen) (default), square | **Decision:** add 9:16 (portrait, for phones) and 4:3? |
 | **Resolution** | heights 360, 480, **720**, 1080, 1440, 2160 | shown as `W x H`. The width is rounded (`frame_width`). |
 | **Smoothing** | none (default), 2 × 2 (4× slower), 3 × 3 (9× slower) | renders aa × aa samples per pixel and averages them in linear light. An option is greyed if it would exceed 30 million render pixels. If the resolution changes so the current choice no longer fits, it drops to the largest that does. Hover: "Render each frame more finely and average it down. Stars no longer flicker as they cross pixel boundaries, and the video compresses better." |
 | **Frame rate** | 24, 25, **30**, 50, 60 fps | |
-| **Quality** | good (QP 26), **high** (QP 20), very high (QP 16), near lossless (QP 10) | each entry's hover gives its quantiser. Hover: "Every frame is encoded at the same quality; busy frames make bigger files". |
-| **Folder** | the default video folder | [6.7](#67-folders-and-file-names) |
-| **File name** | `zoom` | `.mp4` is added. An existing file is never overwritten: `_2`, `_3`, … is added (also when a `<name>_frames` folder exists). |
-| **Also save every frame as a PNG** | off | into `<name>_frames\frame_00000.png`, … next to the video |
+| **Quality** | good (QP 26), **high** (QP 20), very high (QP 16), near lossless (QP 10) | MP4 only. Each entry's hover gives its quantiser. Hover: "Every frame is encoded at the same quality; busy frames make bigger files". |
+| **Folder** | the videos folder | a text box with **Browse…** |
+| **File name** | the project's name | `.mp4` is added, or `_frames` for the PNG folder. An existing file or folder is never overwritten: `_2`, `_3`, … is added. |
 
-### 8.7 The image and picking
+Under the table, in grey: the output's full path, e.g. `C:\Users\…\Videos\Algebraic Fractals\Spiral dive.mp4`.
 
-- **The image:** the previewed frame, or while a video renders, its latest finished frame. Linear texture sampling.
-- **Mark the waypoints** (Preview panel, on by default): each waypoint inside the previewed frame gets a 12 px cross and its number. Once it's more than 3 px and less than the frame's height, its view box is drawn too. The selected waypoint is yellow (255, 200, 40), the others white at 150 alpha. Marks are hidden while picking.
-- **Picking** (Pick on image on):
-  - A frame-shaped box follows the cursor, sized as the previewed frame divided by the **pick zoom**, labelled `x4.000`. The **mouse wheel** changes the pick zoom by × 1.15 per notch, within 0.1–10 000 (default 4).
-  - **Click:** that box becomes the selected waypoint's view.
-  - **Drag:** draw a box (keeping the frame's shape); it becomes the view on release. A box under 4 px keeps the old half-width.
-  - **Shift-click:** moves only the centre.
-  - Hold Shift to hide the box and see only the crosshair.
-  - **Esc** cancels.
-  - After a pick, picking stops, the status says `Waypoint N set to <centre>, half-width <hw>`, and the waypoint's new frame is previewed.
-- Screen and plane coordinates come from the previewed frame's region.
+### 8.8 The waypoint strip
 
-### 8.8 Display: colouring per waypoint
+Always shown, under the tabs, whatever tab is open. It's the user's way to see the whole video at a glance while changing settings.
 
-The heading is "Display at waypoint N". Under it, in grey: "Colour by, colormap, invert, shading and log scale apply to the whole video. The other settings are set at each waypoint, and change smoothly from one waypoint to the next."
-- **For the whole video:** colour by, colormap, invert, shading, log scale and Smooth stars. Changing one at the selected waypoint copies it to every waypoint (`share_choices`).
-- **Per waypoint:** n, max %, min %, brightness, contrast, gamma, saturation, colour cycles and colour shift.
-- **Between waypoints** (`style_at`): each number follows the same kind of monotone curve as the max coefficient, through its values at the waypoints. n, gamma and cycles are interpolated on a log scale, the others directly.
-- If the previewed frame isn't the selected waypoint's, an orange note says "The preview shows a frame between waypoints i and i+1, with the settings in between".
-- **Hold the colour scale** (whole video, default off): see below.
-- **Use this colouring at every waypoint:** copies the selected waypoint's colouring to all of them.
+- **One thumbnail per waypoint,** left to right in order, scrolling sideways when they don't fit. Each is the waypoint's frame (the exact frame the video shows it in), in the video's shape: **160 × 90** for 16:9, 90 × 90 for square. **Decision:** a size control (small 160 / medium 240 / large 320 wide), remembered.
+- **Under each:** its number and name (Start, Finish, or its own), then `hw 2.0e-3  max 41` (the max coefficient, with "auto" in grey if auto chose it, or an orange ⚠ if auto fell short).
+- **Between each pair:** an arrow with the segment's duration (`12 s`).
+- **The selected waypoint's thumbnail** has a yellow (255, 200, 40) border. Click a thumbnail to select it (the tables in the Path and Polynomials tabs follow). Double-click: Show in the explorer. Right-click: **Show in the explorer**, **Set to the explorer's view**, **Insert halfway after**, **Delete**.
+- **How they're rendered:** at the thumbnail's own size, one render each at the waypoint's own max coefficient (so no fading), with no reuse and no smoothing, then coloured with the project's colouring and colour scale. They're low-resolution on purpose: even deep, high-coefficient views take a fraction of a second at this size. A thumbnail shows the frame shrunk, so its stars look denser than the video's.
+- **When they update:**
+  - **Search changes** (a waypoint's view, the max coefficients, the order, the coefficients, the shape): the affected thumbnails re-render 400 ms after the last change. A thumbnail being re-rendered keeps its old picture, dimmed, with a small spinner, until the new one arrives.
+  - **Colour changes:** every thumbnail recolours at once, without searching again.
+  - **Order of work:** the selected waypoint first, then the rest left to right, on all cores, one at a time. A change cancels the current job and starts again with the new settings, keeping renders that are still valid (the render memory, [6.6](#66-renders-kept-in-memory)).
+- **While a video renders:** the strip stays, and the thumbnail of the segment being rendered is marked with a small progress bar along its arrow.
 
-**Hold the colour scale** (`video::held_scale`, carried over):
-- Each waypoint's frame is rendered on its own (never from patches), and its `Levels` are measured.
-- **Length/height:** one fixed range for the whole video, from the lowest value at any waypoint to the highest.
-- **Residual brightness:** the percentiles at min % and max % move steadily from one end of each segment to the other.
-- The preview shows the held scale too. The waypoints' `Levels` are cached (the 64 most recent) under their order, coefficients and frame jobs.
+### 8.9 The bottom bar and rendering
 
-### 8.9 Preview panel
+**Before rendering,** one line:
+- `N frames · <duration> at F fps · W x H`;
+- `~N MB`, from bits per pixel per frame: good 1.5, high 2.3, very high 2.9, near lossless 3.7 (MP4); for PNG frames, about 4 bytes per pixel. Hover: "Star fields need a lot of data to stay sharp; the real size depends on how busy the frames are";
+- `~<render time>`, once worked out in the background (`frame_secs`, scaled by the latest measured render's time per unit of work: the frame preview's, else the strip's). Hover: "Scaled from a measured render by the work each frame needs. Views near the real axis can take longer.";
+- **● Render now:** a large, bold button. It saves the project first if it has a name and unsaved changes **(Decision)**.
 
-- A **frame** slider over the whole video, with **|<** (first frame) and **>|** (last frame).
-- **Mark the waypoints** tick-box ([8.7](#87-the-image-and-picking)).
-- **While rendering:** a progress bar "rendering frame k…".
-- **The frame's details,** in grey:
-
-  ```
-  Frame k: centre <fmt_complex>
-  half-width 1.2345e-3, order 3
-  max coefficient 43.6 (fading from 41 to 46: 52%)        (or "43 (rendered at 43)")
-  rendered in 0.42 s
-  ```
-
-- **When it re-renders:** whenever the frame number, the path or anything else that decides what the frames show changes, after a **400 ms** pause. Colouring changes only recolour.
-- **What a preview does:**
-  - It renders exactly as the video will: the same patch windows with reuse (so the same sample points), the same fades and smoothing, and the held scale.
-  - It takes renders from memory where it can, and keeps everything it renders.
-  - The time it takes (for the frame's own uncached renders) calibrates the render-time estimate.
-- An older preview from a path with a different number of waypoints keeps its colours until the new one arrives.
-
-### 8.10 Status bar
-
-One line:
-- while picking: "Click to make the box the waypoint's view (mouse wheel: box size), or drag a box. Shift-click: move only the centre. Esc cancels.";
-- otherwise, the latest status message, or "Set the waypoints, preview frames and adjust the colours, then Render video".
-
-### 8.11 Video panel and rendering
-
-**Before rendering:**
-- `N frames of W x H, <duration> at F fps`.
-- `File size: roughly N MB`, from bits per pixel per frame: good 1.5, high 2.3, very high 2.9, near lossless 3.7. Hover: "Star fields need a lot of data to stay sharp; the real size depends on how busy the frames are".
-- `Rough render time: <duration>`, once worked out in the background (`frame_secs`, scaled by the latest preview's time per unit of work). Hover: "Scaled from the preview frame's render time by the work each frame needs. Views near the real axis can take longer."
-- **Render video:** a large, bold button.
+**Rendering later:** save the project (Ctrl+S) and close the window. To render it later, open it (Video ▾ → Open video project) and press Render now, or render it with the command line, `algfrac video "Spiral dive"` ([10](#10-the-command-line-tool)), e.g. overnight. **Decision:** a render queue in the app (add several projects, render them one after another) is left out; say if you want it.
 
 **Durations** read like `45 s`, `12 min` or `3 h 20 min` (`duration_text`).
 
 **While rendering:**
-- All the settings above are locked (greyed). Display stays usable, but it doesn't affect this video: the colouring was fixed when Render was pressed.
-- A progress bar `frame k of N, ~T left`, and a thin bar for the current render's rows.
-- Grey: `elapsed T, last frame 1.2 s, 140 MB so far, max coefficient 43.6`.
-- **Stop:** finishes the current frame, then saves the video so far as a shorter video. The status says "Stopping after the current frame…".
-- The image shows each frame as it finishes.
+- The tabs' settings are all locked (greyed), and the project bar too. The window can be closed: the render carries on, and its progress shows in the explorer's toolbar ([5.1](#51-layout)) and the Video menu.
+- The tab area shows the **render panel** instead of the tab:
+  - the latest finished frame, as large as fits;
+  - a progress bar `frame k of N, ~T left`, and a thin bar for the current render's rows;
+  - grey: `elapsed T, last frame 1.2 s, 140 MB so far, max coefficient 43.6`;
+  - **Stop:** finishes the current frame, then saves the video so far as a shorter video. The status says "Stopping after the current frame…".
+- The explorer stays fully usable.
 
 **Time left:** each frame's time is estimated in advance, from its search work (with reuse, a patch counts at the first frame that needs it, plus about 40 ns per pixel per render). The time so far is scaled by (estimated total − estimated so far) / estimated so far.
 
 **Each frame** (`make_video`, to be moved into the library):
-1. With the colour scale held, any waypoint levels not known yet are rendered first.
+1. If the colour scale needs the waypoints' levels (steady brightness, or the length/height scale fixed from the waypoints), each waypoint's frame is rendered first at full resolution, and its levels measured.
 2. For each frame:
    - the renders it needs: with reuse, any of its patches not yet rendered; otherwise its region at each max coefficient, with smoothing;
-   - colouring with `style_at` and the held scale if on;
+   - colouring with the project's style and colour scale;
    - averaging down and cross-fading;
-   - optionally the PNG;
-   - encoding.
+   - writing it: encoding into the MP4, and/or saving the PNG.
 3. **When it ends:**
-   - `Done in T (N MB): <path>`;
+   - `Done in T (N MB): <path>`, with **Show in folder** and **Play** buttons in the render panel;
    - stopped early: `Stopped after k of N frames (T); saved the video so far (N MB): <path>`;
    - stopped before any frame: the file is deleted and the status says "Stopped before the first frame was finished".
-4. Afterwards the preview is rendered again.
+4. Afterwards the tabs come back, unlocked.
 
 **Encoding** (`video::Mp4Out`, carried over):
 - H.264 via OpenH264, compiled into the program.
@@ -642,34 +762,40 @@ One line:
 - **Background detection and adaptive quantisation off.** This is what fixed the "chunks of stars jumping" glitch; don't change it.
 - Muxed with the `mp4` crate (AVCC samples, SPS/PPS in `avcC`). A stopped video is still finished properly, so it plays.
 
-**Closing the window** while a video renders loses that video, since the file is only playable once finished. **(New, Decision)** Ask first: "A video is rendering. Stop it and save what's done, or keep rendering?" with **Stop and save**, **Keep rendering** and **Quit without saving**.
+**Quitting the program** while a video renders loses that video, since the file is only playable once finished. **(New, Decision)** Ask first: "A video is rendering. Stop it and save what's done, or keep rendering?" with **Stop and save**, **Keep rendering** and **Quit without saving**.
+
+### 8.10 Status line
+
+The video window has its own status line, a thin grey line just above the bottom bar, for its messages: saving, opening, Centre on flower, errors. It shows the latest one for 10 s, then clears.
 
 ---
 
-## 9. Moving between the modes (New)
+## 9. How the explorer and videos work together
 
-The point of combining the programs.
+The point of combining the programs. The intended way to make a video:
 
-- **Explore → Video:** a **Send to video** menu in Explore's View panel:
-  - **as the start** / **as the target:** replaces that waypoint's view;
-  - **as a new target:** adds a waypoint after the last.
+1. **Explore** and find views you like.
+2. **Save each as a location** into one group, in the order the video should visit them (★ Save location, then the group). Reorder them in the Locations popup, or use Sort by depth.
+3. **🎬 Make video** on the group (or Video ▾ → New video from group). The video window opens with the group's locations as the start, waypoints and finish, and the explorer's settings and colours.
+4. **Adjust** in the video window's tabs, watching the waypoint strip.
+5. **Render now**, or **Save** and render later.
 
-  Each carries the view and Explore's current colouring. The waypoint's max coefficient is set to auto. If the video's search settings (order, coefficient set, allow 0, 0 can be a root) differ from Explore's, Video mode shows a note with **Use Explore's search settings**. It then switches to Video and selects the waypoint.
-- **Video → Explore:** **Open in Explore** (Waypoints panel) opens the previewed frame in Explore, as a square view:
-  - its centre and half-width (half the frame height);
-  - the video's order and coefficients, with the frame's max coefficient rounded, and auto off;
-  - the frame's colouring.
-
-  Use it to look closely at a frame at high resolution, or to save it as a place with its render.
-- **Places** are one list, so a place saved in one mode appears in the other at once. (The old programs only saw each other's places after a restart, apart from the video maker re-reading the file when saving one.)
-
-**Decision:** whether these bridges carry the colouring and search settings as above, or only the view.
+The links both ways:
+- **Explorer → video:**
+  - a group becomes the waypoints (Make video; or Replace with a group in the Path tab);
+  - **Add the explorer's view** and **Set to the explorer's view** (Path tab, and the strip's right-click menu);
+  - **Copy the explorer's colours** (Colour tab) and **Copy the explorer's settings** (Polynomials tab).
+- **Video → explorer:**
+  - **Show in the explorer** (Path tab, and double-click on a thumbnail): look at a waypoint at high resolution, or adjust it there and press Set to the explorer's view;
+  - **Use these colours in the explorer** (Colour tab);
+  - **Save as a group** (Path tab): the waypoints become locations.
+- A video's waypoints are copies: changing a location later doesn't change a project made from it, and the other way round.
 
 ---
 
 ## 10. The command-line tool
 
-`algfrac.exe` is carried over unchanged (`src/bin/algfrac.rs`):
+`algfrac.exe` is carried over (`src/bin/algfrac.rs`):
 
 ```
 algfrac.exe --order 4 --maxcoef 32 --centre 1.9,0.19 --halfwidth 0.16 --width 1024 --out spiral
@@ -689,50 +815,141 @@ It writes `spiral.png` and `spiral.algf`, and prints its settings, the steps per
 | `--legacy` | the conjugate quadratic variant: `min \|c0 + c1·conj(X) + c2·X²\|`, order 2, c1 ≠ 0 | |
 | `--width W` | pixels across | 512 |
 | `--colour pow\|log\|len\|hgt` | what to plot | `log` |
-| `--n N`, `--max P` (or `--clip P`), `--min P` | as in Display | 1, 99.5, 0 |
+| `--n N`, `--max P` (or `--clip P`), `--min P` | as in the colour controls | 1, 99.5, 0 |
 | `--colormap NAME` | any of the 23 | `bone` |
 | `--invert`, `--noshade`, `--logpoly`, `--sharp` | invert; no shading; log length/height; no Smooth stars | |
-| `--gamma`, `--cycles`, `--shift`, `--brightness`, `--contrast`, `--saturation` | as in Display | 1, 1, 0, 0, 1, 1 |
+| `--gamma`, `--cycles`, `--shift`, `--brightness`, `--contrast`, `--saturation` | as in the colour controls | 1, 1, 0, 0, 1, 1 |
 | `--out NAME`, `--nodata`, `--threads T` | output name; skip the `.algf`; worker threads | `algfrac_out`, all cores |
 
 The `--legacy` variant exists only on the command line.
+
+**(New, Decision) Rendering a video project:**
+
+```
+algfrac.exe video "Spiral dive"            a saved project, by name
+algfrac.exe video D:\shared\dive.afvideo   or a project file
+            [--threads T] [--out FOLDER]
+```
+
+It renders the project exactly as Render now would, to the project's folder (or `--out`), printing the frame, the time left and the size so far every 2 s. Ctrl+C stops after the current frame and saves the video so far. `algfrac.exe video --list` lists the saved projects.
 
 ---
 
 ## 11. Files on disk
 
-The new program must read everything the old programs wrote, and write in the same formats, so nothing a user has saved is lost.
+The new program must read what the old programs wrote (places and paths are brought in, [11.4](#114-old-files-brought-in)), and never change those files.
 
-**The settings folder** is `%APPDATA%\AlgebraicFractals\` on Windows, `~/Library/Application Support/AlgebraicFractals/` on macOS, and `$XDG_CONFIG_HOME/AlgebraicFractals/` (or `~/.config/…`) elsewhere. It holds:
+### 11.1 The settings folder
+
+`%APPDATA%\AlgebraicFractals\` on Windows, `~/Library/Application Support/AlgebraicFractals/` on macOS, and `$XDG_CONFIG_HOME/AlgebraicFractals/` (or `~/.config/…`) elsewhere (`common::settings_dir`). It holds:
 
 | file | format |
 |---|---|
-| `places.tsv` | one place per line, tab-separated; `#` lines are comments. Columns: name, re, im, half-width, order, set name, `1` (unused), max, zero (0/1), colour by, n, max %, colormap, invert, shade, zero root, min %, gamma, cycles, shift, brightness, contrast, saturation, log scale, smooth stars. Columns were only ever added at the end, and missing ones take defaults (`Place::from_line`). Control characters in names become spaces. |
-| `renders/<name>.algf` | a saved place's render. `<name>` has `\ / : * ? " < > \|` and control characters replaced by `_` (`file_safe`). |
-| `paths/<name>.path` | a saved video path (format below) |
+| `locations.tsv` | **(New)** the saved locations ([11.2](#112-locations)) |
+| `projects/<name>.afvideo` | **(New)** saved video projects ([11.3](#113-video-projects)). `<name>` has `\ / : * ? " < > \|` and control characters replaced by `_` (`file_safe`). |
 | `settings.tsv` | **(New, Decision)** remembered settings ([6.8](#68-remembered-settings-new)) |
+| `places.tsv`, `renders/`, `paths/` | the old programs' files: read, never written ([11.4](#114-old-files-brought-in)) |
 
-**`.path` files:**
+### 11.2 Locations
+
+`locations.tsv`: one location per line, in order, tab-separated; `#` lines are comments.
 
 ```
-# comment line
-rate<TAB>1.01
-target<TAB>4
-fade<TAB>1
-reuse<TAB>1
-step<TAB>1
-hold<TAB>0
-flower<TAB>0,1            one 0/1 per segment
-wp<TAB><auto 0/1><TAB><pan speed><TAB><a places.tsv line, named "waypoint N">
-...
+# Algebraic Fractals saved locations: group, name, re, im, half-width
+Spiral dive	start	0	0	2
+Spiral dive	arm	0.2731	0.5512	0.03
+Unsorted	lace	-0.5	0.25	0.001
 ```
 
-- The order and coefficient set come from the first waypoint line, and each waypoint's max coefficient from its own line.
-- **Defaults for anything missing:** rate 1.01 (clamped to 1.001–4), target 4 (clamped to 0.01–1000), fade and reuse on, step 1, hold off, flowers off, pan 0.01.
-- Unknown keys are ignored. Older files have `work`, which is no longer used.
-- A path needs at least two waypoints.
+- Columns: group, name, centre re, centre im, half-width (`Location::to_line`). Numbers are written in Rust's shortest exact form, so they read back exactly.
+- Within a group, the file's order is the group's order. The groups' own order is the order they first appear.
+- Tabs and control characters in names become spaces.
+- A line that can't be read (too few columns, a number that isn't one, a half-width of 0) is skipped.
+- An empty group is kept as a line with only its name and no other columns. The carried-over `load_locations` skips such lines for now; reading them comes with the Locations popup ([17](#17-order-of-work), step 1).
 
-**`.algf` render files** (`src/algf.rs`), little-endian:
+### 11.3 Video projects
+
+`projects/<name>.afvideo`: text, `key<TAB>value` lines; `#` lines are comments. Unknown keys are ignored and missing ones take the defaults in [8.1](#81-a-new-project), so newer files open in older versions and the other way round.
+
+```
+# Algebraic Fractals video project
+version	1
+name	Spiral dive
+# path
+rate	1.01
+wp	start	0	0	2	6	1	0.01	0          name, re, im, half-width, max, auto 0/1, pan to next, keep flower to next 0/1
+wp	arm	0.2731	0.5512	0.03	41	1	0.01	0
+wp	finish	0.27312	0.55121	2e-6	31000	1	0.01	0
+# polynomials
+order	3
+set	ints
+zero	1
+zero_root	1
+target	4
+reuse	1
+step	1                0 fine, 1 medium, 2 coarse
+fade	1
+# colour
+colour_by	pow
+colormap	inferno
+n	3
+high	99.5
+low	0
+invert	0
+shade	1
+log_poly	0
+smooth	1
+gamma	1
+cycles	1
+shift	0
+brightness	0
+contrast	1
+saturation	1
+steady	0
+lh_scale	waypoints       each | waypoints | <from>,<to>
+# output
+format	mp4               mp4 | png | both
+shape	16:9              16:9 | 1:1
+height	720
+smoothing	1
+fps	30
+quality	high            good | high | very high | near lossless
+folder	C:\Users\…\Videos\Algebraic Fractals
+file	Spiral dive
+```
+
+- A project needs at least two `wp` lines; one with fewer won't open, and says so.
+- The last waypoint's pan and flower columns are ignored.
+- Numbers outside a control's range are clamped to it.
+- `version` goes up only if a change can't be read by the rule above.
+
+### 11.4 Old files brought in
+
+- **`places.tsv`** (old saved places): listed as the group **Old places** until a `locations.tsv` exists ([6.5](#65-locations-and-groups-changed)). Columns: name, re, im, half-width, order, set name, `1` (unused), max, zero (0/1), colour by, n, max %, colormap, invert, shade, zero root, min %, gamma, cycles, shift, brightness, contrast, saturation, log scale, smooth stars. Columns were only ever added at the end, and missing ones take defaults (`OldPlace::from_line`). Only the name and view are used.
+- **`renders/<name>.algf`** (old places' saved renders): not used. The command line still reads and writes `.algf`.
+- **`paths/<name>.path`** (old saved video paths, **Decision:** can be opened): listed under **Old paths** in the Open menus. Opening one makes a new, unsaved project: the waypoints with their views, max coefficients, autos, pan speeds and flower settings; zoom per frame, target, fade, reuse, coefficient steps, order and coefficients; the **first waypoint's colouring** for the whole video; steady brightness from `hold`; the default output. The status says `Brought in the old path 'NAME': its colouring is the start's`. The format:
+
+  ```
+  # comment line
+  rate<TAB>1.01
+  target<TAB>4
+  fade<TAB>1
+  reuse<TAB>1
+  step<TAB>1
+  hold<TAB>0
+  flower<TAB>0,1            one 0/1 per segment
+  wp<TAB><auto 0/1><TAB><pan speed><TAB><a places.tsv line, named "waypoint N">
+  ...
+  ```
+
+  - The order and coefficient set come from the first waypoint line, and each waypoint's max coefficient from its own line.
+  - Defaults for anything missing: rate 1.01 (clamped to 1.001–4), target 4 (clamped to 0.01–1000), fade and reuse on, step 1, hold off, flowers off, pan 0.01.
+  - Unknown keys are ignored. Older files have `work`, which is no longer used.
+  - A path needs at least two waypoints.
+
+### 11.5 `.algf` render files
+
+Used by the command line only (`src/algf.rs`), little-endian:
 
 ```
 "ALGF"  u32 version = 2
@@ -770,7 +987,8 @@ The engine is carried over unchanged. These properties are tested and must stay 
 - **Performance targets** (12-core PC; the new program must be no slower):
   - order 4, M = 32, 256²: 0.7 s;
   - order 3, M = 3000, 1280 × 720 at width 10⁻⁷: 0.03 s;
-  - recolour 1024²: under 10 ms.
+  - recolour 1024²: under 10 ms;
+  - **(New)** the waypoint strip, 6 waypoints at 160 × 90 with auto max coefficients up to 10⁵: under 1 s in all.
 
 ---
 
@@ -780,19 +998,31 @@ The engine is carried over unchanged. These properties are tested and must stay 
 |---|---|---|
 | 1 | Names: the app `Algebraic Fractals.exe` (Cargo `algebraic-fractals`), the command line `algfrac.exe`, the repo `algebraic-fractals` | as stated |
 | 2 | Licence | **MIT OR Apache-2.0** (the usual Rust choice). The H.264 encoder (OpenH264) is BSD-licensed, but H.264 is patented. The README will say that the compiled-in encoder isn't covered by Cisco's patent licence, which only covers Cisco's own binaries. |
-| 3 | Going to a place with a saved render adopts its order, coefficients and resolution, and turns auto off ([7.6](#76-saved-places-panel)) | adopt them |
-| 4 | Default folders for images and videos ([6.7](#67-folders-and-file-names)) | Pictures / Videos (Movies on Mac) `\Algebraic Fractals`, unless there's a `Results` folder above the program |
-| 5 | Browse… buttons for folders (adds the `rfd` crate) | yes |
-| 6 | Remember settings between sessions ([6.8](#68-remembered-settings-new)) | yes |
-| 7 | Compressed PNGs ([7.8](#78-save-panel)) | yes |
-| 8 | Ask before closing while a video renders ([8.11](#811-video-panel-and-rendering)) | yes |
-| 9 | Delete saved paths from the Open… menu | yes |
-| 10 | The bridges between modes carry colouring and search settings ([9](#9-moving-between-the-modes-new)) | yes |
-| 11 | Explore keeps renders in the shared 3 GB memory, so Back and changing settings back are instant ([6.6](#66-renders-kept-in-memory)) | yes |
-| 12 | An app icon | yes (a small star-field image, drawn once from a render) |
-| 13 | Automatic GitHub builds for Windows and macOS on each release tag ([15.3](#153-releases-on-github)) | yes, so no Mac is needed for Mac builds |
-| 14 | Open in Explore mode, or in the mode used last | the mode used last |
-| 15 | Keep the command-line tool in the release downloads | yes |
+| 3 | The video window: a separate window, or a large popup inside the main window ([4.2](#42-windows-and-popups)) | a separate window |
+| 4 | A Run button in the toolbar, as well as Enter and double-click ([7.2](#72-toolbar)) | no |
+| 5 | Changing the explorer's resolution re-renders at once ([7.3](#73-settings-strip)) | no (as the old explorer) |
+| 6 | Default folders for images and videos ([6.7](#67-folders-and-file-names)) | Pictures / Videos (Movies on Mac) `\Algebraic Fractals`, unless there's a `Results` folder above the program |
+| 7 | Browse… buttons and a Save image as… dialog (adds the `rfd` crate) | yes |
+| 8 | Remember settings between sessions ([6.8](#68-remembered-settings-new)) | yes |
+| 9 | Compressed PNGs ([7.13](#713-saving-images)) | yes |
+| 10 | Dragging locations in the Locations popup, as well as ↑ ↓ and ⇄ ([7.8](#78-locations-popup)) | yes |
+| 11 | Old places come in as the group "Old places"; their saved renders aren't used ([6.5](#65-locations-and-groups-changed)) | yes |
+| 12 | Old video paths can be opened as projects, with the start's colouring ([11.4](#114-old-files-brought-in)) | yes |
+| 13 | Leaving a project with unsaved changes asks first ([8.3](#83-projects-saving-and-opening)) | ask |
+| 14 | The "Look at a frame" preview in the Path tab, for the frames between waypoints ([8.4](#84-path-tab)) | yes |
+| 15 | Steady brightness on by default ([8.5](#85-colour-tab)) | off (as the old video maker) |
+| 16 | The length/height scale's default ([8.5](#85-colour-tab)) | fixed from the waypoints |
+| 17 | Output formats: MP4, PNG frames, both ([8.7](#87-output-tab)) | those three |
+| 18 | More shapes: 9:16 portrait, 4:3 ([8.7](#87-output-tab)) | no |
+| 19 | A size control for the waypoint strip ([8.8](#88-the-waypoint-strip)) | yes |
+| 20 | Render now saves the project first ([8.9](#89-the-bottom-bar-and-rendering)) | yes |
+| 21 | A render queue in the app ([8.9](#89-the-bottom-bar-and-rendering)) | no |
+| 22 | The command line renders saved video projects ([10](#10-the-command-line-tool)) | yes |
+| 23 | Ask before quitting while a video renders ([8.9](#89-the-bottom-bar-and-rendering)) | yes |
+| 24 | The explorer keeps renders in the shared 3 GB memory, so Back and changing settings back are instant ([6.6](#66-renders-kept-in-memory)) | yes |
+| 25 | An app icon | yes (a small star-field image, drawn once from a render) |
+| 26 | Automatic GitHub builds for Windows and macOS on each release tag ([15.3](#153-releases-on-github)) | yes, so no Mac is needed for Mac builds |
+| 27 | Keep the command-line tool in the release downloads | yes |
 
 ---
 
@@ -800,46 +1030,54 @@ The engine is carried over unchanged. These properties are tested and must stay 
 
 Run with `cargo test --release --lib --bins`. Plain `cargo test` also runs the doc comments' formulas as code.
 
-**Carried over with the code** (already passing here):
+**Carried over with the code** (already passing here, 33 tests):
 - **engine:** both searches against brute force (orders 2–6, every coefficient set, with and without c0 = 0); the tile search's list against brute force; tiled renders equal to per-pixel renders (depths 10⁻³ to 10⁻⁷, across the real axis, outside the unit circle); table chunking.
   - Ignored: `bench_deep`, `diag_deep_lines`.
 - **colour:** lookup tables equal the per-pixel pipeline; Smooth stars keep their brightness; binned percentiles equal sorting.
   - Ignored: `recolour_speed`.
 - **density:** densities integrate to d roots; the root finder.
 - **algf:** round trip; a truncated file is refused.
-- **video:** path ends and speeds, waypoints, frame sizes, pan speed, smooth curves, style blending, max coefficients, flower size, finding quadratic numbers, cross-fade, held scale, downsampling keeps brightness, writes a playable mp4 (up to 3840 × 2160).
+- **video:** path ends and speeds, waypoints, frame sizes, pan speed, smooth curves, max coefficients, flower size, finding quadratic numbers, cross-fade, held scale (one style), downsampling keeps brightness, writes a playable mp4 (up to 3840 × 2160).
 - **reuse:** ladders, plans cover the frames, same grid gives the same picture, windows and averaging.
-- **common:** parsing complex numbers; a place's line round trip.
+- **common:** parsing complex numbers; a location's line round trip; old place lines (oldest and newest column counts).
 
 **To port from the old video maker** (with the logic moved into the library):
 - `render_memory`;
-- `paths_save_and_load`;
 - `flower_sets_the_next_max`;
 - `short_zoom_video_reusing` and `short_zoom_video_frame_by_frame`. These are end-to-end: auto never falls, maxes never fall, and the first decoded frame matches what was rendered;
 - `faint_rows_of_stars_survive_encoding`: the worst 16 × 16 block's error stays below 3;
 - ignored: `bench_reuse`, `flower_video`, `diag_wobble`, `diag_decode`, `diag_encoder`.
 
 **To port from the old explorer:**
-- `auto_density`: auto lands near the target and never falls as you zoom in;
-- `saved_place_renders`.
+- `auto_density`: auto lands near the target and never falls as you zoom in.
 
 **New:**
-- the shared render memory gives Explore an instant Back;
-- `settings.tsv` round trip;
-- old `places.tsv` and `.path` files from the old programs load unchanged. Check in a sample of each as test data.
+- locations: saving, moving within and between groups, renaming, deleting, sorting by depth, and the file round trip (including empty groups);
+- `places.tsv` from the old programs comes in as Old places;
+- a video project's file round trip, with every setting changed from its default;
+- an old `.path` file opens as a project, with the start's colouring;
+- the length/height scale: each frame, fixed from the waypoints, fixed by hand;
+- PNG-frames output writes the frames, numbered, and the same pixels as the MP4's input;
+- the command line renders a saved project;
+- the shared render memory gives the explorer an instant Back;
+- `settings.tsv` round trip.
+
+Check in a sample `places.tsv` and `.path` from the old programs as test data (`tests/data/`).
 
 **Equivalence with the old programs:**
 - The command line with the same arguments writes byte-identical `.png` and `.algf` files.
-- A short video with the same settings gives identical frames (compare the PNG frames).
+- A short video with the same settings and one colouring gives identical frames (compare the PNG frames).
 
 **GUI checks by hand** before each release:
-- explore, zoom, Back;
-- save and go to a place, with and without a saved render;
-- send a view to Video;
-- pick a waypoint;
-- preview with Hold the colour scale;
-- render a short video and play it;
-- stop a video early and play it.
+- explore, zoom, Back, Home, the right-click menu;
+- each popup opens, closes with Esc, and works over the image;
+- save locations into a new group, reorder them, move one to another group;
+- Make video from the group; the strip renders; change the colour, the order and the root density, and watch the strip update;
+- Show in the explorer, then Set to the explorer's view;
+- save the project, close the window, reopen it from the Video menu;
+- render a short video (MP4 and PNG frames) and play it;
+- stop a video early and play it;
+- render a saved project from the command line.
 
 ---
 
@@ -856,6 +1094,7 @@ Run with `cargo test --release --lib --bins`. Plain `cargo test` also runs the d
 - **`.cargo/config.toml`** (carried over): targets `x86-64-v2`, and links MinGW's C++ runtime statically. Each `.exe` is self-contained. Check with `objdump -p … | findstr "DLL Name"`.
 - **Release profile:** thin LTO, one codegen unit, `panic = "abort"`.
 - `#![windows_subsystem = "windows"]` on the app (no console window), but not on `algfrac.exe`.
+- **Dependencies to add for the app:** `eframe`/`egui` 0.31 (as the old programs), `rfd` (Decision 7), and `png` or `miniz_oxide` (Decision 9).
 
 ### 15.2 macOS
 
@@ -883,7 +1122,7 @@ Without an Apple Developer ID, Gatekeeper blocks the app until the user allows i
 - **`README.md` (GitHub front page):** three example pictures, then:
   - a one-paragraph description;
   - **Download** (links to the latest release) and **Quick start**;
-  - what Explore and Video do, in a few bullets each;
+  - what the explorer and the video window do, in a few bullets each;
   - "What is computed";
   - "Why the patterns look the way they do" (dark holes, the real axis, flowers, order 3, symmetries, star size, density), from the old root README;
   - further reading;
@@ -891,15 +1130,14 @@ Without an Apple Developer ID, Gatekeeper blocks the app until the user allows i
   - the licence.
 - **`docs/USER-GUIDE.md`:** one guide for the app.
   - Getting started.
-  - The window and the modes.
-  - Shared concepts: search settings, density and auto, colouring, places.
-  - Explore.
-  - Video (waypoints, how the path moves, keeping a flower the same size, the max coefficient, reuse, output, preview, colouring per waypoint, holding the colour scale, render times).
-  - Moving between modes.
+  - The explorer: the toolbar, the settings strip, the popups, the mouse.
+  - Search settings, root density and auto, colours.
+  - Locations and groups.
+  - Making a video: from a group to a finished video (the steps in [9](#9-how-the-explorer-and-videos-work-together)), then each tab (how the path moves, keeping a flower the same size, the max coefficient, reuse, the colour scale, output), the waypoint strip, render times, rendering later and from the command line.
   - Tips.
-  - Troubleshooting (both old tables, merged).
+  - Troubleshooting (both old tables, merged and updated).
 
-  Merge the old two guides' text, keeping the measured tables (render times, file sizes, quality).
+  Keep the old guides' measured tables (render times, file sizes, quality).
 - **`docs/DEVELOPER.md`:** the old developer README, updated for the new layout and names.
 - **`docs/MAC.md`:** the old README-MAC, updated for one app.
 - **Writing style:** British spelling, plain words, short sentences, numbers measured rather than guessed, as in the old guides.
@@ -908,11 +1146,11 @@ Without an Apple Developer ID, Gatekeeper blocks the app until the user allows i
 
 ## 17. Order of work
 
-1. **The library:** move `Frames`, `auto_maxes`, `frame_secs`, `RenderKey`/`RenderMemory`, `SavedPath` and `make_video` into the library, with their tests. Make `make_video` report progress through a callback, without egui.
-2. **The app shell:** window, top bar with the mode tabs, shared state, status bar, `widgets.rs` (coefficient rows, Display, colormap strip, places menu).
-3. **Explore mode**, at parity with the old explorer, using the shared render memory.
-4. **Video mode**, at parity with the old video maker.
-5. **The bridges** between modes, remembered settings, folder defaults and Browse…, compressed PNGs, the close prompt, the icon.
+1. **The library:** move `Frames`, `auto_maxes`, `frame_secs`, `RenderKey`/`RenderMemory` and `make_video` into the library, with their tests. Make `make_video` report progress through a callback, without egui, and write PNG frames as well as MP4. Write `VideoProject` and its file, bringing in old `.path` files, and the length/height scale options. Finish locations (empty groups) and `settings.tsv`.
+2. **The main window:** toolbar, settings strip, image and mouse, status bar, the shared render memory; then the popups (View, Polynomials, Colours, Save location, Locations, Folders); saving images.
+3. **The video window:** project bar, the four tabs, the waypoint strip, the bottom bar, rendering, the frame preview.
+4. **The links** between the explorer and the video window ([9](#9-how-the-explorer-and-videos-work-together)), remembered settings, the quit prompt, the icon.
+5. **The command line's `video`.**
 6. **Tests:** ported and new; equivalence checks against the old programs.
 7. **Build scripts, docs, licence, README pictures, GitHub workflows.** Then a release build and the manual checks in [14](#14-tests).
 
@@ -925,26 +1163,28 @@ Each step ends with the tests passing and a commit.
 | constant | value | where |
 |---|---|---|
 | `MAX_COEF` | 1 000 000 | largest max coefficient |
-| `AUTO_MAX_STEPS` | 2·10⁴ | Explore's auto work limit per pixel |
-| default target density | 4 per 100 px² | both modes |
-| Explore resolutions | 128, 256, 384, 512, 768, 1024, 1536, 2048, 4096 | |
-| Explore history | 30 views | Back |
-| zoom factor | 1–1000, default 4, wheel × 1.15 per notch | Explore |
-| settle delay | 400 ms | before an automatic re-render (both modes) |
+| `AUTO_MAX_STEPS` | 2·10⁴ | the explorer's auto work limit per pixel |
+| default target root density | 4 per 100 px² | everywhere |
+| explorer resolutions | 128, 256, 384, 512, 768, 1024, 1536, 2048, 4096 | |
+| explorer history | 30 views | Back |
+| zoom factor | 1–1000, default 4, wheel × 1.15 per notch | explorer |
+| settle delay | 400 ms | before an automatic re-render (explorer, waypoint strip, frame preview) |
 | `TABLE_MAX` | 2²⁶ entries per thread | engine |
 | tiles | about 256 polynomials each, at most 64 px across; split above 4096; per-pixel below 8 px or 4 × 4 | engine |
 | `RENDER_MEMORY` | 3 GB | shared render memory |
-| levels cache | 64 waypoint levels | Video |
-| video heights | 360, 480, 720, 1080, 1440, 2160 | Video |
-| frame rates | 24, 25, 30, 50, 60 | Video |
-| quality | good QP 26 (1.5 bpp), high QP 20 (2.3), very high QP 16 (2.9), near lossless QP 10 (3.7) | Video |
-| smoothing | 1, 2, 3 (aa × aa) | Video |
-| `MAX_RENDER_PIXELS` | 30 000 000 | Video renders and patches |
-| `PATCH_FRAMES` | 6 | Video reuse |
-| `COEF_STEPS` | fine 0.125, medium 0.25, coarse 0.5 | Video reuse |
-| `DEFAULT_PAN` | 0.01 frame heights per frame | Video |
-| zoom per frame | 1.001–4, default 1.01 | Video |
-| pick zoom | 0.1–10 000, default 4 | Video |
+| levels cache | 64 waypoint levels | video |
+| thumbnails | 160 × 90 (16:9), 90 × 90 (square); medium 240, large 320 wide | waypoint strip |
+| video heights | 360, 480, 720, 1080, 1440, 2160 | video |
+| frame rates | 24, 25, 30, 50, 60 | video |
+| quality | good QP 26 (1.5 bpp), high QP 20 (2.3), very high QP 16 (2.9), near lossless QP 10 (3.7) | video |
+| smoothing | 1, 2, 3 (aa × aa) | video |
+| `MAX_RENDER_PIXELS` | 30 000 000 | video renders and patches |
+| `PATCH_FRAMES` | 6 | video reuse |
+| `COEF_STEPS` | fine 0.125, medium 0.25, coarse 0.5 | video reuse |
+| `DEFAULT_PAN` | 0.01 frame heights per frame | video |
+| zoom per frame | 1.001–4, default 1.01 | video |
 | keyframe interval | 2 s | encoder |
-| time per pixel per render (estimate) | 40 ns | Video time estimates |
-| precision warning | half-width < 10⁻¹² × \|centre\| | Video |
+| time per pixel per render (estimate) | 40 ns | video time estimates |
+| precision warning | half-width < 10⁻¹² × \|centre\| | explorer and video |
+| `OLD_PLACES_GROUP` | "Old places" | locations |
+| default group | "Unsorted" | locations |

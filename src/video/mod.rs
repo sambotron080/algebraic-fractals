@@ -1,7 +1,7 @@
 //! The zoom path through a list of views, the frame regions along it, the smooth
-//! interpolation of the waypoints' max coefficients and colourings, the colouring of
-//! each frame, and writing the frames to an H.264 .mp4 file (OpenH264, compiled in,
-//! plus the mp4 crate's muxer).
+//! interpolation of the waypoints' max coefficients, the colouring of each frame (one
+//! style for the whole video), and writing the frames to an H.264 .mp4 file (OpenH264,
+//! compiled in, plus the mp4 crate's muxer).
 
 pub mod reuse;
 
@@ -162,32 +162,6 @@ pub fn smooth(xs: &[f64], ys: &[f64], x: f64) -> f64 {
         + h(i) * slope(i + 1) * (t3 - t2)
 }
 
-/// The colouring in frame `k`: each number follows a smooth curve through its values
-/// at the waypoints (the multiplicative ones on a log scale). The choices (colour by,
-/// colormap, invert, shade) are the same at every waypoint.
-pub fn style_at(path: &ZoomPath, styles: &[Style], k: usize) -> Style {
-    if styles.len() < 2 {
-        return styles[0];
-    }
-    let (xs, x) = (path.stop_frames(), k as f64);
-    let lin = |f: fn(&Style) -> f64| smooth(&xs, &styles.iter().map(f).collect::<Vec<_>>(), x);
-    let geo = |f: fn(&Style) -> f64| smooth(&xs, &styles.iter().map(|s| f(s).max(1e-9).ln()).collect::<Vec<_>>(), x).exp();
-    let mut s = Style {
-        n: geo(|s| s.n),
-        high: lin(|s| s.high),
-        low: lin(|s| s.low),
-        gamma: geo(|s| s.gamma),
-        cycles: geo(|s| s.cycles),
-        shift: lin(|s| s.shift),
-        brightness: lin(|s| s.brightness),
-        contrast: lin(|s| s.contrast),
-        saturation: lin(|s| s.saturation),
-        ..styles[0]
-    };
-    s.low = s.low.min(s.high - 0.1).max(0.0);
-    s
-}
-
 /// The max coefficient in frame `k`: a smooth curve through the waypoints' values, on a
 /// log scale. Keeping the density of algebraic numbers steady while zooming needs the max
 /// coefficient to grow like a power of the magnification, which is a straight line on
@@ -310,17 +284,17 @@ pub fn colour_frame(renders: &[(Render, Stats, f64)], style: &Style, scale: Opti
 
 /// The colour scale of frame `k` when it's held, from every waypoint's levels (`levels`,
 /// one list per waypoint). The residual brightness is the scale at each end of the
-/// frame's segment (for the styles there), mixed by how far along the segment it is.
-/// The lengths and heights are on one range for the whole video: from the lowest at any
-/// waypoint (usually the start) to the highest (usually the deepest), so a value has
-/// the same colour in every frame.
-pub fn held_scale(path: &ZoomPath, styles: &[Style], levels: &[Vec<(Levels, f64)>], k: usize) -> Scale {
+/// frame's segment, mixed by how far along the segment it is. The lengths and heights
+/// are on one range for the whole video: from the lowest at any waypoint (usually the
+/// start) to the highest (usually the deepest), so a value has the same colour in every
+/// frame.
+pub fn held_scale(path: &ZoomPath, style: &Style, levels: &[Vec<(Levels, f64)>], k: usize) -> Scale {
     let (i, t) = path.locate(k);
-    let at = |levels: &[(Levels, f64)], s: &Style| Scale::mix(&levels.iter().map(|(l, w)| (l.scale(s), *w)).collect::<Vec<_>>());
+    let at = |levels: &[(Levels, f64)]| Scale::mix(&levels.iter().map(|(l, w)| (l.scale(style), *w)).collect::<Vec<_>>());
     let j = (i + 1).min(levels.len() - 1);
-    let (a, b) = (at(&levels[i], &styles[i]), at(&levels[j], &styles[j.min(styles.len() - 1)]));
+    let (a, b) = (at(&levels[i]), at(&levels[j]));
     let mut s = Scale::mix(&[(a, 1.0 - t), (b, t)]);
-    let all: Vec<Scale> = levels.iter().flatten().map(|(l, _)| l.scale(&styles[0])).collect();
+    let all: Vec<Scale> = levels.iter().flatten().map(|(l, _)| l.scale(style)).collect();
     let range = |f: fn(&Scale) -> (f64, f64)| {
         (all.iter().map(|x| f(x).0).fold(f64::INFINITY, f64::min), all.iter().map(|x| f(x).1).fold(f64::NEG_INFINITY, f64::max))
     };
@@ -594,7 +568,7 @@ impl Mp4Out {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::colour::{colourise, Colormap};
+    use crate::colour::colourise;
 
     const HOME: View = View { cr: 0.0, ci: 0.0, hw: 2.0 };
 
@@ -709,24 +683,6 @@ mod tests {
     }
 
     #[test]
-    fn styles_blend() {
-        let a = Style { n: 1.0, brightness: 0.0, cmap: Colormap::Inferno, ..Style::default() };
-        let b = Style { n: 4.0, brightness: 0.4, ..a };
-        let p = ZoomPath::new(vec![HOME, View { hw: 0.02, ..HOME }, View { hw: 0.0002, ..HOME }], 1.05);
-        let styles = [a, b, b];
-        let (k0, k1) = (p.stop_frame(0), p.stop_frame(1));
-        assert_eq!(style_at(&p, &styles, k0), a);
-        assert_eq!(style_at(&p, &styles, k1), b);
-        // halfway, between the two (easing into the second), and the second segment stays put
-        let m = style_at(&p, &styles, k1 / 2);
-        assert!(m.n > 1.5 && m.n < 3.5 && m.brightness > 0.1 && m.brightness < 0.35 && m.cmap == Colormap::Inferno, "{m:?}");
-        let ns: Vec<f64> = (0..=k1).map(|k| style_at(&p, &styles, k).n).collect();
-        assert!(ns.windows(2).all(|w| w[1] >= w[0]));
-        let later = style_at(&p, &styles, k1 + 3);
-        assert!((later.n - b.n).abs() < 1e-12 && (later.brightness - b.brightness).abs() < 1e-12);
-    }
-
-    #[test]
     fn max_coefficients() {
         let p = ZoomPath::new(vec![HOME, View { hw: 0.02, ..HOME }, View { hw: 0.0002, ..HOME }], 1.05);
         let maxes = [4, 16, 64];
@@ -812,19 +768,19 @@ mod tests {
             vec![(Stats::new(&r).levels(), 1.0)]
         };
         let all = [levels(3, p.stops[0]), levels(12, p.stops[1])];
-        let styles = [Style::default(), Style { high: 99.0, ..Style::default() }];
+        let style = Style::default();
         let last = p.frames() - 1;
-        let (s0, want) = (all[0][0].0.scale(&styles[0]), all[1][0].0.scale(&styles[1]));
+        let (s0, want) = (all[0][0].0.scale(&style), all[1][0].0.scale(&style));
         // the residual brightness moves from one end's scale to the other's
-        assert_eq!(held_scale(&p, &styles, &all, 0).ln_hi, s0.ln_hi);
-        assert!((held_scale(&p, &styles, &all, last).ln_hi - want.ln_hi).abs() < 1e-9);
-        let mid = held_scale(&p, &styles, &all, last / 2);
+        assert_eq!(held_scale(&p, &style, &all, 0).ln_hi, s0.ln_hi);
+        assert!((held_scale(&p, &style, &all, last).ln_hi - want.ln_hi).abs() < 1e-9);
+        let mid = held_scale(&p, &style, &all, last / 2);
         assert!(mid.ln_hi > s0.ln_hi.min(want.ln_hi) && mid.ln_hi < s0.ln_hi.max(want.ln_hi));
         // the lengths and heights are on one range throughout: the start's lowest to the deepest's highest
         let range = (s0.height.0.min(want.height.0), s0.height.1.max(want.height.1));
         assert_eq!(range.1, 12.0);
         for k in [0, last / 2, last] {
-            let s = held_scale(&p, &styles, &all, k);
+            let s = held_scale(&p, &style, &all, k);
             assert_eq!(s.height, range);
             assert_eq!(s.length, (s0.length.0.min(want.length.0), s0.length.1.max(want.length.1)));
         }

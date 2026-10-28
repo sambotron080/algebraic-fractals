@@ -66,9 +66,110 @@ OUTPUT:
   --nodata              skip the .algf data file (raw residuals and coefficients)
   --threads T           worker threads (default: all cores)
 
+VIDEO:
+  algfrac video NAME    render a video project saved in the app (by its name, or the
+                        path of a .afvideo file), exactly as Render now would
+    --out FOLDER        write the video there instead of the project's folder
+    --threads T         worker threads (default: all cores)
+  algfrac video --list  list the saved projects
+  Ctrl+C stops after the current frame and keeps the video so far.
+
 EXAMPLE:
   algfrac --order 4 --maxcoef 32 --centre 1.9,0.19 --halfwidth 0.16 --width 1024 --out spiral
+  algfrac video \"Spiral dive\"
 ";
+
+/// `algfrac video ...`: renders a saved video project. Returns the exit code.
+fn video(args: &[String]) -> i32 {
+    use algfrac::video::frames::duration_text;
+    use algfrac::video::make::{make_video, output_paths, VideoSettings};
+    use algfrac::video::project;
+    let (mut name, mut out, mut threads) = (None, None, thread::available_parallelism().map_or(4, |n| n.get()));
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--list" => {
+                for n in project::saved_projects() {
+                    println!("{n}");
+                }
+                return 0;
+            }
+            "--out" => out = it.next().cloned(),
+            "--threads" => match it.next().map(|t| num::<usize>(t)) {
+                Some(Ok(t)) if t > 0 => threads = t,
+                _ => {
+                    eprintln!("error: --threads needs a number");
+                    return 2;
+                }
+            },
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                return 0;
+            }
+            _ if name.is_none() => name = Some(a.clone()),
+            _ => {
+                eprintln!("error: unknown option '{a}'");
+                return 2;
+            }
+        }
+    }
+    let Some(name) = name else {
+        eprintln!("error: which project? (algfrac video --list lists them)");
+        return 2;
+    };
+    let mut p = match project::open_project(&name, &algfrac::common::default_videos_dir()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    // the max coefficients, as the app would choose them
+    for (i, note) in p.refresh_auto(&mut algfrac::density::Predictor::new()).iter().enumerate() {
+        if !note.is_empty() {
+            eprintln!("waypoint {}: auto: {note}", i + 1);
+        }
+    }
+    let folder = out.unwrap_or_else(|| p.output.folder.clone());
+    let (mp4, pngs) = output_paths(&folder, &p.output.file, p.output.format);
+    let v = VideoSettings::of(&p, threads);
+    let f = &v.frames;
+    let n = f.count();
+    println!("{}: {n} frames of {} x {}, {} at {} fps, max coefficient {:?}", p.name, f.width(), f.height, duration_text(n as f64 / v.fps as f64), v.fps, f.maxes);
+    // each frame's share of the work, to scale the time so far into the time left
+    let est: Vec<f64> = f.frame_secs(1e-9, v.colouring.needs_levels()).into_iter().scan(0.0, |t, s| {
+        *t += s;
+        Some(*t)
+    }).collect();
+    let cancel: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+    let _ = ctrlc::set_handler(move || {
+        if cancel.swap(true, Ordering::Relaxed) {
+            process::exit(130); // a second Ctrl+C stops at once
+        }
+        eprintln!("\nstopping after the current frame (Ctrl+C again to quit at once)...");
+    });
+    let (started, mut last) = (Instant::now(), Instant::now());
+    let rows = (&AtomicUsize::new(0), &AtomicUsize::new(0));
+    let res = make_video(&v, mp4.as_deref(), pngs.as_deref(), cancel, rows, &mut |fr| {
+        if last.elapsed() >= Duration::from_secs(2) || fr.k + 1 == n {
+            last = Instant::now();
+            let el = started.elapsed().as_secs_f64();
+            let so_far = est.get(fr.k).copied().unwrap_or(1.0).max(1e-12);
+            let left = el * (est.last().copied().unwrap_or(0.0) - so_far).max(0.0) / so_far;
+            println!("  frame {} of {n}, {:.0} MB so far, ~{} left", fr.k + 1, fr.bytes as f64 / 1e6, duration_text(left));
+        }
+    });
+    match res {
+        Ok(msg) => {
+            println!("{msg}");
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
 
 struct Config {
     order: usize,
@@ -200,6 +301,10 @@ fn parse_args() -> Result<Config, String> {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("video") {
+        process::exit(video(&args[1..]));
+    }
     let cfg = match parse_args() {
         Ok(c) => c,
         Err(e) if e.is_empty() => {

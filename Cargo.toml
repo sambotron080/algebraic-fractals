@@ -21,6 +21,7 @@ openh264 = "0.9.9"     # H.264 encoder, compiled from Cisco's OpenH264 source
 miniz_oxide = "0.8.9"  # deflate, for compressed PNGs
 eframe = "0.31.1"      # the window (egui)
 rfd = "0.15"           # native folder and file dialogs
+ctrlc = "3.4"          # Ctrl+C in `algfrac video`: stop after the current frame
 
 [profile.release]
 opt-level = 3

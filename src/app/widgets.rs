@@ -11,19 +11,18 @@ pub const ORANGE: Color32 = Color32::from_rgb(230, 180, 60);
 /// The zoom box, the selected waypoint.
 pub const YELLOW: Color32 = Color32::from_rgb(255, 200, 40);
 
-/// The coefficient-set rows of a two-column settings grid: which set, allow 0, 0 can be
-/// a root. `salt` keeps the ids apart where it appears twice.
+/// The coefficient-set rows of a two-column settings grid: which set, and 0 can be a
+/// root. (0 is always an allowed coefficient.) `salt` keeps the ids apart where it
+/// appears twice.
 pub fn coef_set_rows(ui: &mut egui::Ui, c: &mut Coefs, salt: &str) {
+    c.zero = true;
     ui.label("Coefficients");
     egui::ComboBox::from_id_salt(("set", salt)).selected_text(c.set.label()).show_ui(ui, |ui| {
         for s in CoefSet::ALL {
             let eg: Vec<String> = s.upto(1000).iter().take(5).map(|v| v.to_string()).collect();
-            ui.selectable_value(&mut c.set, s, s.label()).on_hover_text(format!("±{}, ...", eg.join(", ±")));
+            ui.selectable_value(&mut c.set, s, s.label()).on_hover_text(format!("0, ±{}, ...", eg.join(", ±")));
         }
     });
-    ui.end_row();
-    ui.label("");
-    ui.checkbox(&mut c.zero, "allow 0").on_hover_text("Untick to make every power appear (no zero coefficients)");
     ui.end_row();
     ui.label("");
     ui.checkbox(&mut c.zero_root, "0 can be a root")
@@ -68,9 +67,9 @@ pub fn colour_controls(ui: &mut egui::Ui, style: &mut Style, ramp: &mut Option<(
     });
     egui::CollapsingHeader::new("Adjust").id_salt(("adjust", salt)).default_open(true).show(ui, |ui| {
         let s = &mut *style;
-        ui.add_enabled(uses_res, egui::Slider::new(&mut s.n, 0.05..=20.0).logarithmic(true).text("n  (1/res^n)"))
+        ui.add_enabled(uses_res, egui::Slider::new(&mut s.n, 0.05..=5.0).logarithmic(true).text("n  (1/res^n)"))
             .on_hover_text("Larger n makes the points near algebraic numbers sharper");
-        ui.add_enabled(uses_res, egui::Slider::new(&mut s.high, 50.0..=100.0).text("max %"))
+        ui.add_enabled(uses_res, egui::Slider::new(&mut s.high, 90.0..=100.0).text("max %"))
             .on_hover_text("Brightness percentile that becomes full brightness: 99.5 saturates the brightest 0.5% of pixels.\nLower = brighter image");
         ui.add_enabled(uses_res, egui::Slider::new(&mut s.low, 0.0..=100.0).text("min %"))
             .on_hover_text("Brightness percentile that becomes black: 50 makes the darker half of the pixels black.\nRaise it to hide the background haze");
@@ -82,7 +81,7 @@ pub fn colour_controls(ui: &mut egui::Ui, style: &mut Style, ramp: &mut Option<(
              Points smaller than a pixel then keep a steady brightness as a video moves them,\n\
              instead of twinkling, and rows of close points don't shimmer",
         );
-        ui.add(egui::Slider::new(&mut s.brightness, -1.0..=1.0).text("brightness"));
+        ui.add(egui::Slider::new(&mut s.brightness, -0.5..=0.5).text("brightness"));
         ui.add(egui::Slider::new(&mut s.contrast, 0.0..=4.0).text("contrast"));
         ui.add(egui::Slider::new(&mut s.gamma, 0.1..=10.0).logarithmic(true).text("gamma"))
             .on_hover_text("Above 1 brightens the midtones (faint points), below 1 darkens them,\nwithout changing pure black or full brightness");

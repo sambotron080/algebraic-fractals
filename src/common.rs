@@ -10,9 +10,6 @@ use std::path::PathBuf;
 
 /// (sparse sets like the powers of 2 need large values to have many members)
 pub const MAX_COEF: i32 = 1_000_000;
-/// The explorer's auto settings never choose more work per pixel than this (about
-/// 7 s at 256 x 256 and 2 minutes at 1024 x 1024 on 12 cores).
-pub const AUTO_MAX_STEPS: f64 = 2e4;
 
 /// A square region of the complex plane.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -150,16 +147,7 @@ pub fn load_groups() -> Vec<Group> {
     let read = |path: PathBuf| std::fs::read_to_string(path).ok();
     let mut groups = match read(locations_path()) {
         Some(s) => groups_from_text(&s),
-        None => {
-            let old = read(old_places_path()).unwrap_or_default();
-            let locations: Vec<Location> = old
-                .lines()
-                .filter(|l| !l.starts_with('#'))
-                .filter_map(OldPlace::from_line)
-                .map(|p| Location { name: p.name, view: p.view })
-                .collect();
-            if locations.is_empty() { Vec::new() } else { vec![Group { name: OLD_PLACES_GROUP.into(), locations }] }
-        }
+        None => old_places_group(&read(old_places_path()).unwrap_or_default()).into_iter().collect(),
     };
     match groups.iter().position(|g| g.name == UNSORTED) {
         Some(i) => {
@@ -169,6 +157,14 @@ pub fn load_groups() -> Vec<Group> {
         None => groups.insert(0, Group { name: UNSORTED.into(), locations: Vec::new() }),
     }
     groups
+}
+
+/// The old programs' saved places (the text of their places.tsv) as the group
+/// `OLD_PLACES_GROUP`, if there are any.
+pub fn old_places_group(text: &str) -> Option<Group> {
+    let locations: Vec<Location> =
+        text.lines().filter(|l| !l.starts_with('#')).filter_map(OldPlace::from_line).map(|p| Location { name: p.name, view: p.view }).collect();
+    (!locations.is_empty()).then(|| Group { name: OLD_PLACES_GROUP.into(), locations })
 }
 
 pub fn store_groups(groups: &[Group]) -> std::io::Result<()> {
@@ -283,24 +279,9 @@ pub fn sig(x: f64) -> String {
     format!("{x:.decimals$}")
 }
 
-/// A Results folder above the executable, if there is one (the developer's own setup).
-fn results_dir() -> Option<PathBuf> {
-    let mut dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()));
-    while let Some(d) = dir {
-        if d.join("Results").is_dir() {
-            return Some(d.join("Results"));
-        }
-        dir = d.parent().map(|p| p.to_path_buf());
-    }
-    None
-}
-
 /// "Algebraic Fractals" in the user's folder for `kind` (Pictures, Videos, or Movies on
-/// macOS), unless there's a Results folder above the executable.
+/// macOS).
 fn default_dir(kind: &str) -> String {
-    if let Some(d) = results_dir() {
-        return d.display().to_string();
-    }
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
     home.map_or_else(|| PathBuf::from("."), |h| h.join(kind).join("Algebraic Fractals")).display().to_string()
 }
@@ -496,6 +477,38 @@ mod tests {
         let mixed = "g\ta\t0\t0\t1\nh\tb\t0\t0\t1\ng\tc\t0\t0\t1\nbad\tline\n";
         let g = groups_from_text(mixed);
         assert_eq!(g.iter().map(|g| (g.name.as_str(), g.locations.len())).collect::<Vec<_>>(), [("g", 2), ("h", 1)]);
+    }
+
+    /// A places.tsv written by the old programs comes in as the group Old places.
+    #[test]
+    fn old_places_come_in() {
+        let g = old_places_group(include_str!("../tests/data/places.tsv")).unwrap();
+        assert_eq!(g.name, OLD_PLACES_GROUP);
+        let names: Vec<&str> = g.locations.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["spiral", "lace", "deep flower"]);
+        assert_eq!(g.locations[2].view, View { cr: 1.0 / 3.0, ci: 0.4714045207910317, hw: 2.4e-8 });
+        assert_eq!(old_places_group("# nothing\n"), None);
+    }
+
+    /// Auto lands near the target root density, and zooming in never lowers it.
+    #[test]
+    fn auto_density() {
+        let mut p = Predictor::new();
+        let coefs = Coefs { zero_root: true, ..Coefs::ints(12) };
+        let mut last = (0, 0);
+        for hw in [2.0, 0.5, 0.1, 0.02, 0.004] {
+            let region = Region::square(0.4, 0.85, hw, 512);
+            let (_, m, note_m) = choose_auto(&mut p, 4, coefs, &region, 4.0, false, f64::INFINITY);
+            let (o, _, _) = choose_auto(&mut p, 4, coefs, &region, 4.0, true, f64::INFINITY);
+            let dm = p.per_pixel(4, &m, &region) * 100.0;
+            // with a free max coefficient, the target is hit closely
+            if note_m.is_empty() && m.max > 1 {
+                let below = p.per_pixel(4, &Coefs { max: m.max - 1, ..m }, &region) * 100.0;
+                assert!((4.0 * 0.6..=4.0 / 0.6).contains(&dm) || below < 4.0, "hw {hw}: {dm}");
+            }
+            assert!(m.max >= last.0 && o >= last.1, "zooming in never lowers the auto setting");
+            last = (m.max, o);
+        }
     }
 
     /// Lines written by the old programs: the oldest (9 columns) and the newest (25).

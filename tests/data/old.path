@@ -1,0 +1,10 @@
+# Algebraic Fractals video path. Waypoint lines: wp, auto max coefficient, pan speed, then as in places.tsv
+rate	1.01
+target	4
+fade	1
+reuse	1
+step	1
+hold	0
+flower	0
+wp	1	0.01	waypoint 1	0	0	2	3	ints	1	6	1	pow	1	99.5	magma	0	1	1	0	1	1	0	0	1	1	0	1
+wp	1	0.01	waypoint 2	0.3333333333333333	0.4714045207910317	0.002	3	ints	1	120	1	pow	3	99	inferno	0	1	1	0	1	1	0	0.2	1	1	0	1

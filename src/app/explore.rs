@@ -6,7 +6,6 @@ use super::Shared;
 use algfrac::colour::{colourise, colourise_into, ColourBy, Stats, Style};
 use algfrac::common::*;
 use algfrac::engine::{render_axes, Coefs, Plan, Region, Render};
-use algfrac::memory::RenderKey;
 use algfrac::png::write_png_compressed;
 use eframe::egui::{self, pos2, vec2, Color32, ColorImage, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions};
 use std::path::PathBuf;
@@ -43,10 +42,11 @@ impl Search {
     }
 }
 
-/// The search that auto order / max coefficient would choose for `view` (see choose_auto).
+/// The search that auto order / max coefficient would choose for `view` (see
+/// choose_auto), with no limit on the work, as for videos.
 pub fn auto_search(p: &mut algfrac::density::Predictor, s: Search, view: View, target: f64, auto_order: bool) -> (Search, String) {
     let region = Region::square(view.cr, view.ci, view.hw, s.width);
-    let (order, coefs, note) = choose_auto(p, s.order, s.coefs, &region, target, auto_order, AUTO_MAX_STEPS);
+    let (order, coefs, note) = choose_auto(p, s.order, s.coefs, &region, target, auto_order, f64::INFINITY);
     (Search { order, coefs, ..s }, note)
 }
 
@@ -62,7 +62,6 @@ pub struct Shown {
 struct Job {
     search: Search,
     view: View,
-    key: RenderKey,
     cancel: Arc<AtomicBool>,
     rows: Arc<AtomicUsize>,
     height: usize,
@@ -185,15 +184,15 @@ impl Explorer {
         let coefs = Coefs {
             set: s.str("explore.set").and_then(|t| algfrac::engine::CoefSet::ALL.into_iter().find(|c| c.name() == t)).unwrap_or(algfrac::engine::CoefSet::Ints),
             max: s.get::<i32>("explore.max").unwrap_or(12).clamp(1, MAX_COEF),
-            zero: s.flag("explore.zero").unwrap_or(true),
+            zero: true, // 0 is always an allowed coefficient
             zero_root: s.flag("explore.zero_root").unwrap_or(true),
         };
         let search = Search {
             order: s.get::<usize>("explore.order").unwrap_or(3).clamp(1, 16),
             coefs,
-            width: s.get::<usize>("explore.width").filter(|w| RESOLUTIONS.contains(w)).unwrap_or(256),
+            width: s.get::<usize>("explore.width").filter(|w| RESOLUTIONS.contains(w)).unwrap_or(512),
         };
-        let (auto_order, auto_max) = (s.flag("explore.auto_order").unwrap_or(false), s.flag("explore.auto_max").unwrap_or(false));
+        let (auto_order, auto_max) = (s.flag("explore.auto_order").unwrap_or(false), s.flag("explore.auto_max").unwrap_or(true));
         Explorer {
             search,
             zoom: s.get::<f64>("explore.zoom").unwrap_or(4.0).clamp(1.0, 1000.0),
@@ -204,7 +203,7 @@ impl Explorer {
             shown_gen: 0,
             history: Vec::new(),
             job: None,
-            requested: s.view("explore.view").unwrap_or(View::HOME),
+            requested: s.view("explore.view").unwrap_or(super::HOME),
             applied: search.key(),
             changed: None,
             auto_order,
@@ -234,7 +233,6 @@ impl Explorer {
         s.set("explore.order", self.search.order);
         s.set("explore.set", c.set.name());
         s.set("explore.max", c.max);
-        s.set_flag("explore.zero", c.zero);
         s.set_flag("explore.zero_root", c.zero_root);
         s.set("explore.width", self.search.width);
         s.set_flag("explore.auto_order", self.auto_order);
@@ -299,7 +297,7 @@ impl Explorer {
     }
 
     /// Starts rendering `view` with the current search settings (cancelling any running
-    /// render), or shows it straight away if that render is still in memory.
+    /// render).
     pub fn start(&mut self, ctx: &egui::Context, shared: &mut Shared, view: View) {
         if let Some(job) = self.job.take() {
             job.cancel.store(true, Ordering::Relaxed);
@@ -311,13 +309,6 @@ impl Explorer {
         self.changed = None;
         let region = Region::square(view.cr, view.ci, view.hw, search.width);
         let (re, im) = region.axes();
-        let key = RenderKey::new(search.order, search.coefs, &re, &im);
-        if let Some(r) = shared.memory.get(&key) {
-            let started = Instant::now();
-            self.show(r, view, search);
-            self.status = format!("Shown from memory, {0}x{0} in {1:.2}s", search.width, started.elapsed().as_secs_f64());
-            return;
-        }
         let cancel = Arc::new(AtomicBool::new(false));
         let rows = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = mpsc::channel();
@@ -334,7 +325,7 @@ impl Explorer {
             let _ = tx.send(res);
             super::repaint_now(&ctx2);
         });
-        self.job = Some(Job { search, view, key, cancel, rows, height, started: Instant::now(), rx });
+        self.job = Some(Job { search, view, cancel, rows, height, started: Instant::now(), rx });
     }
 
     fn show(&mut self, render: Arc<Render>, view: View, search: Search) {
@@ -356,13 +347,12 @@ impl Explorer {
     }
 
     /// Picks up a finished render.
-    fn poll(&mut self, ctx: &egui::Context, shared: &mut Shared) {
+    fn poll(&mut self, ctx: &egui::Context) {
         let Some(job) = &self.job else { return };
         match job.rx.try_recv() {
             Ok(Ok(render)) => {
                 let job = self.job.take().unwrap();
                 let render = Arc::new(render);
-                shared.memory.put(job.key, render.clone());
                 self.status = format!("Rendered {}x{} in {:.2}s", render.width, render.height, job.started.elapsed().as_secs_f64());
                 self.show(render, job.view, job.search);
             }
@@ -473,7 +463,7 @@ impl Explorer {
     /// The toolbar, the settings strip, the status bar and the image. Returns what's asked
     /// of the video window.
     pub fn update(&mut self, ctx: &egui::Context, shared: &mut Shared, video: &VideoInfo) -> Option<ToVideo> {
-        self.poll(ctx, shared);
+        self.poll(ctx);
         if self.shown.is_none() && self.job.is_none() && self.status.is_empty() {
             let v = self.requested;
             self.start(ctx, shared, v); // the first render
@@ -574,10 +564,10 @@ impl Explorer {
             Some(Action::Back) => {
                 if let Some(prev) = self.history.pop() {
                     self.target = None;
-                    self.start(ctx, shared, prev); // instant if it's still in memory
+                    self.start(ctx, shared, prev);
                 }
             }
-            Some(Action::Home) => self.navigate(ctx, shared, View::HOME),
+            Some(Action::Home) => self.navigate(ctx, shared, super::HOME),
             Some(Action::ZoomOut) => {
                 let v = self.current_view();
                 self.navigate(ctx, shared, View { hw: v.hw * self.zoom.max(2.0), ..v });
@@ -638,10 +628,13 @@ impl Explorer {
         let has_image = self.shown.is_some();
         ui.horizontal_wrapped(|ui| {
             let popup = |ui: &mut egui::Ui, open: bool, text: &str, tip: &str| ui.add(egui::Button::new(text).selected(open)).on_hover_text(tip).clicked();
+            if ui.add_enabled(has_image, egui::Button::new("▶ Run")).on_hover_text("Zoom into the yellow box (Enter, or double-click on the image)").clicked() {
+                *action = Some(Action::Run);
+            }
             if ui.add_enabled(!self.history.is_empty(), egui::Button::new("⏴ Back")).on_hover_text("The previous view (Backspace)").clicked() {
                 *action = Some(Action::Back);
             }
-            if ui.button("🏠 Home").on_hover_text("Back to the whole picture, -2..2 (Home key)").clicked() {
+            if ui.button("🏠 Home").on_hover_text("Back to the whole picture, -1.5..1.5 (Home key)").clicked() {
                 *action = Some(Action::Home);
             }
             if ui.button("➖ Zoom out").on_hover_text("Zoom out by the zoom factor (at least x2), keeping the centre").clicked() {

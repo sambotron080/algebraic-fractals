@@ -1,0 +1,4 @@
+# Algebraic Fractals saved places: name, re, im, half-width, order, set, (unused), max, zero, colour by, n, max %, colormap, invert, shade, c0 = 0 allowed, min %, gamma, cycles, shift, brightness, contrast, saturation, log length/height
+spiral	1.9	0.19	0.16	4	ints	1	32	1
+lace	-0.5	0.25	0.001	5	pow2	1	64	0	log	2	99	inferno	1	0	1	5	1.5	2	0.25	0.1	1.2	0.8	1	0
+deep flower	0.3333333333333333	0.4714045207910317	2.4e-8	3	ints	1	37912	1	pow	1	99.5	bone	0	1	1	0	1	1	0	0	1	1	0	1

@@ -7,7 +7,6 @@ pub mod widgets;
 
 use algfrac::common::{Group, View};
 use algfrac::density::Predictor;
-use algfrac::memory::RenderMemory;
 use algfrac::video::project::VideoProject;
 use eframe::egui;
 use explore::Explorer;
@@ -21,7 +20,6 @@ pub struct Shared {
     /// the root viewport's context, for background threads to ask for a repaint
     pub ctx: egui::Context,
     pub groups: Vec<Group>,
-    pub memory: RenderMemory,
     pub predictor: Predictor,
     pub threads: usize,
     pub images_dir: String,
@@ -48,6 +46,9 @@ pub fn repaint_after(ctx: &egui::Context, ms: u64) {
     ctx.request_repaint_after_for(Duration::from_millis(ms), egui::ViewportId::ROOT);
 }
 
+/// The whole picture, −1.5 … 1.5: where the explorer starts, and a new video's start.
+pub const HOME: View = View { cr: 0.0, ci: 0.0, hw: 1.5 };
+
 /// The flower around (1 + i√2)/3, a root of 3x² - 2x + 1.
 pub const FLOWER: View = View { cr: 1.0 / 3.0, ci: 0.4714045207910317, hw: 0.002 };
 
@@ -59,8 +60,8 @@ pub fn new_project(shared: &Shared, explorer: &Explorer, group: Option<usize>) -
         Some(g) => (g.name.clone(), g.locations.iter().map(|l| (l.name.clone(), l.view)).collect()),
         None => {
             let here = explorer.current_view();
-            let finish = if here == View::HOME { FLOWER } else { here };
-            ("my zoom".to_string(), vec![("start".to_string(), View::HOME), ("finish".to_string(), finish)])
+            let finish = if here == HOME { FLOWER } else { here };
+            ("my zoom".to_string(), vec![("start".to_string(), HOME), ("finish".to_string(), finish)])
         }
     };
     let s = &explorer.search;

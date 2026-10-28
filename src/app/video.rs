@@ -8,7 +8,6 @@ use super::{repaint_after, repaint_now, Shared};
 use algfrac::colour::{ColourBy, Scale, Stats, Style};
 use algfrac::common::*;
 use algfrac::engine::{render_axes, work_per_pixel, Coefs, Plan, Render};
-use algfrac::memory::RenderKey;
 use algfrac::video::frame_width;
 use algfrac::video::frames::*;
 use algfrac::video::make::{make_video, output_paths, FrameDone, VideoSettings};
@@ -97,7 +96,6 @@ struct PreviewJob {
     k: usize,
     needs: Vec<(i32, f64)>,
     ends: Vec<(LevelsKey, End)>,
-    keys: Vec<RenderKey>,
     extra_lens: Vec<usize>,
     cancel: Arc<AtomicBool>,
     rows: Arc<AtomicUsize>,
@@ -289,7 +287,7 @@ impl VideoWindow {
 
     /// Keeps unsaved changes as the "(last session)" project, when the program closes.
     pub fn keep_last_session(&mut self) -> Option<String> {
-        if !self.unsaved() {
+        if !self.unsaved() && project::project_file(&self.project.name).exists() {
             return Some(self.project.name.clone());
         }
         project::save_project(&self.project, LAST_SESSION).ok().map(|_| LAST_SESSION.to_string())
@@ -310,10 +308,11 @@ impl VideoWindow {
     }
 
     /// Picks up finished work: thumbnails, the preview, the estimate and the video. Called
-    /// every frame, even while the window is closed (a render carries on).
-    pub fn poll(&mut self, ctx: &egui::Context, shared: &mut Shared) {
+    /// every frame, even while the window is closed (a render carries on; the thumbnails
+    /// and preview wait until it's open again).
+    pub fn poll(&mut self, ctx: &egui::Context, shared: &mut Shared, open: bool) {
         self.poll_render(ctx);
-        if self.render.is_some() {
+        if self.render.is_some() || !open {
             return;
         }
         self.refresh_auto(shared);
@@ -336,9 +335,6 @@ impl VideoWindow {
             for msg in job.rx.try_iter().collect::<Vec<_>>() {
                 match msg {
                     StripMsg::Thumb(i, key, renders) => {
-                        for ((m, re, im, _), r) in key.2.iter().zip(&renders) {
-                            shared.memory.put(RenderKey::new(key.0, Coefs { max: *m, ..key.1 }, re, im), r.clone());
-                        }
                         if wanted.get(i) == Some(&key) {
                             let t = &mut self.strip.thumbs[i];
                             t.renders = renders.iter().zip(&key.2).map(|(r, j)| (Render::clone(r), Stats::new(r), j.3)).collect();
@@ -394,19 +390,7 @@ impl VideoWindow {
         }
         let mut order: Vec<usize> = (0..n).filter(|&i| self.strip.thumbs[i].key.as_ref() != Some(&wanted[i])).collect();
         order.sort_by_key(|&i| i != self.sel);
-        let mut todo = Vec::new();
-        for i in order {
-            let key = wanted[i].clone();
-            let known: Vec<Option<Arc<Render>>> = key.2.iter().map(|(m, re, im, _)| shared.memory.get(&RenderKey::new(key.0, Coefs { max: *m, ..key.1 }, re, im))).collect();
-            if known.iter().all(|k| k.is_some()) {
-                let t = &mut self.strip.thumbs[i];
-                t.renders = known.iter().flatten().zip(&key.2).map(|(r, j)| (Render::clone(r), Stats::new(r), j.3)).collect();
-                t.key = Some(key);
-                self.strip.gen += 1;
-            } else {
-                todo.push((i, key, known));
-            }
-        }
+        let todo: Vec<(usize, LevelsKey)> = order.into_iter().map(|i| (i, wanted[i].clone())).collect();
         self.strip.target = wanted;
         if todo.is_empty() {
             return;
@@ -417,21 +401,15 @@ impl VideoWindow {
         std::thread::spawn(move || {
             let rows = AtomicUsize::new(0);
             let (mut work, started) = (0.0, Instant::now());
-            for (i, key, known) in todo {
+            for (i, key) in todo {
                 let mut out = Vec::new();
-                for ((m, re, im, _), k) in key.2.iter().zip(known) {
-                    let r = match k {
-                        Some(r) => r,
-                        None => {
-                            let Ok(plan) = Plan::new(key.0, &Coefs { max: *m, ..key.1 }, false) else { return };
-                            work += work_per_pixel(&plan, re, im) * (re.len() * im.len()) as f64;
-                            match render_axes(&plan, re.clone(), im.clone(), threads, &c2, &rows) {
-                                Some(r) => Arc::new(r),
-                                None => return, // cancelled
-                            }
-                        }
-                    };
-                    out.push(r);
+                for (m, re, im, _) in &key.2 {
+                    let Ok(plan) = Plan::new(key.0, &Coefs { max: *m, ..key.1 }, false) else { return };
+                    work += work_per_pixel(&plan, re, im) * (re.len() * im.len()) as f64;
+                    match render_axes(&plan, re.clone(), im.clone(), threads, &c2, &rows) {
+                        Some(r) => out.push(Arc::new(r)),
+                        None => return, // cancelled
+                    }
                 }
                 let _ = tx.send(StripMsg::Thumb(i, key, out));
                 repaint_now(&ctx);
@@ -510,11 +488,9 @@ impl VideoWindow {
                 ends.push((key, end));
             }
         }
-        // every render, the frame's first; those made before come from memory
+        // every render, the frame's first
         let extra_lens = extra.iter().map(|e| e.len()).collect();
         let all: Vec<Job> = jobs.iter().cloned().chain(extra.into_iter().flatten()).collect();
-        let keys: Vec<RenderKey> = all.iter().map(|j| RenderKey::new(frames.order, frames.coefs_for(j.0), &j.1, &j.2)).collect();
-        let known: Vec<Option<Arc<Render>>> = keys.iter().map(|key| shared.memory.get(key)).collect();
         let plan = |j: &Job| Plan::new(frames.order, &frames.coefs_for(j.0), false);
         let plans = match all.iter().map(plan).collect::<Result<Vec<Plan>, _>>() {
             Ok(p) => p,
@@ -523,7 +499,7 @@ impl VideoWindow {
                 return;
             }
         };
-        let rows_total = all.iter().zip(&known).filter(|(_, r)| r.is_none()).map(|(j, _)| j.2.len()).sum();
+        let rows_total = all.iter().map(|j| j.2.len()).sum();
         let needs: Vec<(i32, f64)> = jobs.iter().map(|j| (j.0, j.3)).collect();
         let n_frame = jobs.len();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -532,18 +508,15 @@ impl VideoWindow {
         let (c2, r2, ctx, threads) = (cancel.clone(), rows.clone(), shared.ctx.clone(), shared.threads);
         std::thread::spawn(move || {
             // the search work of the frame's own renders, to time against
-            let work = (0..n_frame).filter(|&i| known[i].is_none()).map(|i| work_per_pixel(&plans[i], &all[i].1, &all[i].2) * (all[i].1.len() * all[i].2.len()) as f64).sum();
+            let work = (0..n_frame).map(|i| work_per_pixel(&plans[i], &all[i].1, &all[i].2) * (all[i].1.len() * all[i].2.len()) as f64).sum();
             let started = Instant::now();
             let mut secs = 0.0;
             let mut out = Vec::with_capacity(all.len());
-            for (i, ((plan, (_, re, im, _)), known)) in plans.iter().zip(all).zip(known).enumerate() {
-                out.push(match known {
-                    Some(r) => r,
-                    None => match render_axes(plan, re, im, threads, &c2, &r2) {
-                        Some(r) => Arc::new(r),
-                        None => return, // cancelled
-                    },
-                });
+            for (i, (plan, (_, re, im, _))) in plans.iter().zip(all).enumerate() {
+                match render_axes(plan, re, im, threads, &c2, &r2) {
+                    Some(r) => out.push(Arc::new(r)),
+                    None => return, // cancelled
+                }
                 if i + 1 == n_frame {
                     secs = started.elapsed().as_secs_f64();
                 }
@@ -551,7 +524,7 @@ impl VideoWindow {
             let _ = tx.send((out, work, secs));
             repaint_now(&ctx);
         });
-        self.preview_job = Some(PreviewJob { frames, k, needs, ends, keys, extra_lens, cancel, rows, rows_total, rx });
+        self.preview_job = Some(PreviewJob { frames, k, needs, ends, extra_lens, cancel, rows, rows_total, rx });
     }
 
     fn poll_preview(&mut self, shared: &mut Shared) {
@@ -559,9 +532,6 @@ impl VideoWindow {
             match job.rx.try_recv() {
                 Ok((all, work, secs)) => {
                     let job = self.preview_job.take().unwrap();
-                    for (key, r) in job.keys.into_iter().zip(&all) {
-                        shared.memory.put(key, r.clone());
-                    }
                     let mut all = all.into_iter();
                     let renders: Vec<(Render, Stats, f64)> = all
                         .by_ref()
@@ -680,20 +650,15 @@ impl VideoWindow {
         let p = &self.project;
         let (mp4, pngs) = output_paths(&p.output.folder, &p.output.file, p.output.format);
         let mut v = VideoSettings::of(p, shared.threads);
-        // the waypoints' levels already measured by previews, or measured now from their
-        // renders kept in memory
+        // the waypoints' levels already measured by the frame preview (the rest are
+        // measured when the render starts)
         if p.colouring.needs_levels() {
             let f = &v.frames;
             let ladder = f.ladder();
             v.levels = (0..f.path.stops.len())
                 .map(|i| {
                     let key = f.levels_key(&ladder, i);
-                    if let Some(c) = self.levels_cache.iter().find(|c| c.0 == key) {
-                        return Some(c.1.clone());
-                    }
-                    let renders = key.2.iter().map(|j| shared.memory.get(&RenderKey::new(key.0, Coefs { max: j.0, ..key.1 }, &j.1, &j.2)));
-                    let renders: Vec<Arc<Render>> = renders.collect::<Option<_>>()?;
-                    Some(renders.iter().zip(&key.2).map(|(r, j)| (f.stats(r).levels(), j.3)).collect())
+                    self.levels_cache.iter().find(|c| c.0 == key).map(|c| c.1.clone())
                 })
                 .collect();
         }

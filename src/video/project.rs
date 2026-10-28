@@ -83,6 +83,7 @@ impl VideoProject {
     /// the default path, rendering and output settings.
     pub fn new(name: &str, stops: Vec<(String, View)>, order: usize, coefs: Coefs, target: f64, style: Style, folder: &str) -> VideoProject {
         let n = stops.len();
+        let coefs = Coefs { zero: true, ..coefs }; // 0 is always an allowed coefficient
         let (names, views): (Vec<String>, Vec<View>) = stops.into_iter().unzip();
         VideoProject {
             name: name.to_string(),
@@ -371,13 +372,13 @@ impl VideoProject {
         let style = Style {
             by: get("colour_by").and_then(|t| ColourBy::ALL.into_iter().find(|b| b.short() == t)).unwrap_or(d.by),
             cmap: get("colormap").and_then(|t| Colormap::ALL.into_iter().find(|c| c.name() == t)).unwrap_or(d.cmap),
-            n: num("n").map_or(d.n, |v| v.clamp(0.05, 20.0)),
-            high: num("high").map_or(d.high, |v| v.clamp(50.0, 100.0)),
+            n: num("n").map_or(d.n, |v| v.clamp(0.05, 5.0)),
+            high: num("high").map_or(d.high, |v| v.clamp(90.0, 100.0)),
             low: num("low").map_or(d.low, |v| v.clamp(0.0, 100.0)),
             gamma: num("gamma").map_or(d.gamma, |v| v.clamp(0.1, 10.0)),
             cycles: num("cycles").map_or(d.cycles, |v| v.clamp(1.0, 50.0)),
             shift: num("shift").map_or(d.shift, |v| v.clamp(0.0, 1.0)),
-            brightness: num("brightness").map_or(d.brightness, |v| v.clamp(-1.0, 1.0)),
+            brightness: num("brightness").map_or(d.brightness, |v| v.clamp(-0.5, 0.5)),
             contrast: num("contrast").map_or(d.contrast, |v| v.clamp(0.0, 4.0)),
             saturation: num("saturation").map_or(d.saturation, |v| v.clamp(0.0, 3.0)),
             invert: flag("invert", d.invert),
@@ -410,7 +411,7 @@ impl VideoProject {
                 coefs: Coefs {
                     set: get("set").and_then(|t| CoefSet::ALL.into_iter().find(|s| s.name() == t)).unwrap_or(CoefSet::Ints),
                     max: wps[0].2,
-                    zero: flag("zero", true),
+                    zero: true, // (always allowed now; older files may say otherwise)
                     zero_root: flag("zero_root", true),
                 },
                 fade: flag("fade", true),
@@ -557,7 +558,7 @@ mod tests {
             ("arm".to_string(), View { cr: 0.1, ci: -0.3, hw: 1e-5 }),
             ("finish".to_string(), View { cr: 1.0 / 3.0, ci: 2f64.sqrt() / 3.0, hw: 0.002 }),
         ];
-        let coefs = Coefs { set: CoefSet::Primes, max: 6, zero: false, zero_root: true };
+        let coefs = Coefs { set: CoefSet::Primes, max: 6, zero: true, zero_root: false };
         let mut p = VideoProject::new("dive", stops, 4, coefs, 3.5, Style::default(), "C:\\videos");
         p.frames.path.rate = 1.015;
         p.frames.path.pan = vec![0.02, 0.005];
@@ -607,6 +608,14 @@ mod tests {
         assert_eq!((p.target, p.frames.fade, p.frames.step, p.colouring.steady), (6.0, false, 2, true));
         assert_eq!((p.colouring.style.by, p.colouring.style.cmap), (ColourBy::Log, Colormap::Inferno), "the start's colouring");
         assert_eq!((p.name.as_str(), p.output.file.as_str()), ("old one", "old one"));
+    }
+
+    /// A .path file written by the old video maker opens.
+    #[test]
+    fn old_path_file() {
+        let p = VideoProject::from_old_path(include_str!("../../tests/data/old.path"), "old", "C:\\v").unwrap();
+        assert_eq!((p.len(), p.frames.maxes.clone(), p.colouring.style.cmap), (2, vec![6, 120], Colormap::Magma));
+        assert_eq!(p.frames.path.stops[1].hw, 0.002);
     }
 
     /// Waypoint edits keep the parallel lists in step.

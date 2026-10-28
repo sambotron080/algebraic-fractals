@@ -1,0 +1,62 @@
+# On a version tag (v0.3.0, ...): test, build the Windows and macOS downloads, and attach
+# them to a draft GitHub Release (publish it by hand once it looks right).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      # the MSVC toolchain here (the local build uses MinGW, see build.ps1), with the C
+      # runtime linked in, so each .exe is self-contained; any x86-64 CPU from ~2009 on
+      RUSTFLAGS: "-C target-feature=+crt-static -C target-cpu=x86-64-v2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release --lib --bins
+      - run: cargo build --release
+      - name: Zip
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/algebraic-fractals.exe "dist/Algebraic Fractals.exe"
+          Copy-Item target/release/algfrac.exe, docs/USER-GUIDE.md dist
+          Compress-Archive -Path dist/* -DestinationPath "AlgebraicFractals-$v-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: AlgebraicFractals-*-windows-x64.zip
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: cargo test --release --lib --bins
+      - run: bash build-mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist-mac/AlgebraicFractals-*-macos.zip
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: artifacts/*.zip

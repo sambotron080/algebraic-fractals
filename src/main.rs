@@ -6,11 +6,8 @@
 
 mod app;
 
-use algfrac::colour::{colourise, Colormap, Stats, Style};
 use algfrac::common::{default_images_dir, default_videos_dir, load_groups, UNSORTED};
 use algfrac::density::Predictor;
-use algfrac::engine::{render, Coefs, Plan, Region};
-use algfrac::memory::RenderMemory;
 use algfrac::settings::Settings;
 use algfrac::video::project;
 use app::explore::{Explorer, ToVideo, VideoInfo};
@@ -41,7 +38,6 @@ impl App {
         let shared = Shared {
             ctx: cc.egui_ctx.clone(),
             groups: load_groups(),
-            memory: RenderMemory::default(),
             predictor: Predictor::new(),
             threads: std::thread::available_parallelism().map_or(4, |n| n.get()),
             images_dir: settings.str("images_dir").map_or_else(default_images_dir, str::to_string),
@@ -177,7 +173,7 @@ impl eframe::App for App {
         }
 
         if let Some(v) = &mut self.video {
-            v.poll(ctx, &mut self.shared);
+            v.poll(ctx, &mut self.shared, self.video_open);
         }
         let info = VideoInfo::of(self.video_open, self.video.as_ref());
         if let Some(t) = self.explorer.update(ctx, &mut self.shared, &info) {
@@ -224,14 +220,10 @@ impl eframe::App for App {
     }
 }
 
-/// The window's icon: a small star field, rendered at start.
+/// The window's icon: the lotus flower around (−1)^(1/3), rendered at start (a few ms).
 fn icon() -> egui::IconData {
     const W: usize = 64;
-    let plan = Plan::new(3, &Coefs { zero_root: true, ..Coefs::ints(6) }, false).unwrap();
-    let r = render(&plan, &Region::square(0.35, 0.55, 0.6, W), 4, &Default::default(), &Default::default()).unwrap();
-    let st = Stats::new(&r);
-    let rgb = colourise(&r, &st, &Style { cmap: Colormap::Inferno, n: 1.5, ..Style::default() });
-    let rgba = rgb.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect();
+    let rgba = algfrac::icon::lotus(W).chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect();
     egui::IconData { rgba, width: W as u32, height: W as u32 }
 }
 

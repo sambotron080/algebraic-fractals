@@ -3,6 +3,8 @@ name = "algebraic-fractals"
 version = "0.3.0"
 edition = "2021"
 description = "Explore algebraic-number fractals and make zoom videos of them"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sambotron080/algebraic-fractals"
 
 # src/lib.rs          -> the algfrac library: engine, colouring, density, files, video
 # src/main.rs, app/   -> Algebraic Fractals.exe (the explorer and the video window)
@@ -22,6 +24,9 @@ miniz_oxide = "0.8.9"  # deflate, for compressed PNGs
 eframe = "0.31.1"      # the window (egui)
 rfd = "0.15"           # native folder and file dialogs
 ctrlc = "3.4"          # Ctrl+C in `algfrac video`: stop after the current frame
+
+[build-dependencies]
+winresource = "0.1"    # the .exe's icon (build.rs)
 
 [profile.release]
 opt-level = 3

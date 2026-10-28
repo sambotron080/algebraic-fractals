@@ -302,6 +302,16 @@ pub fn unused_stem(stem: &str, taken: impl Fn(&str) -> bool) -> String {
     (1..).map(|i| if i == 1 { stem.to_string() } else { format!("{stem}_{i}") }).find(|s| !taken(s)).unwrap()
 }
 
+/// "3x² - 2x + 1", for a quadratic's coefficients [a, b, c] (a x² + b x + c).
+pub fn quadratic_text([a, b, c]: [i64; 3]) -> String {
+    let term = |k: i64, x: &str, first: bool| match (k, first) {
+        (0, _) => String::new(),
+        (k, true) => format!("{}{x}", if k == 1 && !x.is_empty() { String::new() } else { k.to_string() }),
+        (k, false) => format!(" {} {}{x}", if k < 0 { '-' } else { '+' }, if k.abs() == 1 && !x.is_empty() { String::new() } else { k.abs().to_string() }),
+    };
+    format!("{}{}{}", term(a, "x²", true), term(b, "x", false), term(c, "", false))
+}
+
 /// "3x^4 - 2x^2 + 1": highest power first, coefficients of ±1 left out (except the constant).
 pub fn poly_string(c: &[i32]) -> String {
     let mut s = String::new();

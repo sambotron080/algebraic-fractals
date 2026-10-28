@@ -100,8 +100,11 @@ impl Explorer {
                 .on_hover_text("Type a complex number, e.g. 0.5+0.8i, -1.2-3e-4i, 2i or 0.5, 0.8, then press Enter or Go");
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.end_row();
-            ui.label("Half-width");
-            let r = ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.goto_hw)).on_hover_text("Distance from the centre to the edge of the image");
+            let square = self.shown.as_ref().is_none_or(|s| s.render.width == s.render.height);
+            ui.label(if square { "Half-width" } else { "Half-height" });
+            let r = ui
+                .add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.goto_hw))
+                .on_hover_text("Distance from the centre to the top and bottom edges of the image\n(and to the sides, for a square image)");
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.end_row();
         });
@@ -112,6 +115,19 @@ impl Explorer {
             }
             if ui.button("Copy").on_hover_text("Copy the centre and half-width as text").clicked() {
                 ui.ctx().copy_text(format!("{}, {}", complex_text(view.cr, view.ci), view.hw));
+            }
+            if ui
+                .button("🌸 Centre on flower")
+                .on_hover_text("Move the centre exactly onto the simplest quadratic number within half the half-width:\nthe centre of the largest flower there")
+                .clicked()
+            {
+                match super::explore::flower_near(view.cr, view.ci, view.hw / 2.0) {
+                    Ok((re, im, poly)) => {
+                        *action = Some(Action::Go(View { cr: re, ci: im, hw: view.hw }));
+                        self.status = format!("Centred on the flower at {}, a root of {poly}", complex_text(re, im));
+                    }
+                    Err(e) => self.status = e,
+                }
             }
             if parsed.is_none() {
                 ui.colored_label(Color32::LIGHT_RED, "can't read that number");

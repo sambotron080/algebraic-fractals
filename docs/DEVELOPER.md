@@ -11,7 +11,7 @@ residual(X) = min |c0 + c1·X + c2·X² + … + cn·Xⁿ|
 over integer coefficients `|ci| ≤ M` with `c0 ≠ 0`, together with the coefficients that achieve it. Small residuals mark points close to an algebraic number of degree ≤ n. Several other coefficient sets are available:
 - sparser sets, with 0 and ± the members up to `M`: 1 and the primes, Fibonacci numbers, odd numbers, triangular numbers, squares, cubes, or powers of 2;
 - no zero coefficients;
-- `c0 = 0` allowed, so that 0 itself counts as a root.
+- 0 counted as a root (`zero_root`). Polynomials with `c0 = 0`, `x·q(x)`, are never searched: near `q`'s roots inside the unit circle `|X·q(X)| < |q(X)|`, so they'd beat the simpler `q` and pixels would show a spare factor of x. Instead the polynomial `x` (residual `|X|`) is tried at every pixel after the search, and wins ties (`add_root_zero` in engine.rs). Other reducible polynomials can still win, e.g. `(x + 1)·q` near `q`'s roots within 1 of −1.
 
 For why the images look the way they do, see [the README](../README.md#why-the-patterns-look-the-way-they-do).
 

@@ -5,7 +5,7 @@
 use super::frames::{auto_maxes, AutoInputs, Colouring, Frames, LhScale, Shape, COEF_STEPS, FPS, HEIGHTS, QUALITY};
 use super::{simplest_quadratic, ZoomPath, DEFAULT_PAN};
 use crate::colour::{ColourBy, Colormap, Style};
-use crate::common::{complex_text, file_safe, settings_dir, OldPlace, View, MAX_COEF};
+use crate::common::{complex_text, file_safe, quadratic_text, settings_dir, OldPlace, View, MAX_COEF};
 use crate::density::Predictor;
 use crate::engine::{CoefSet, Coefs};
 use std::collections::HashMap;
@@ -257,14 +257,9 @@ impl VideoProject {
     pub fn centre_on_flower(&mut self, i: usize) -> String {
         let v = self.frames.path.stops[i];
         match simplest_quadratic(v.cr, v.ci, v.hw / 2.0, 1_000_000) {
-            Some(([a, b, c], re, im)) => {
+            Some((abc, re, im)) => {
                 self.frames.path.stops[i] = View { cr: re, ci: im, ..v };
-                let term = |k: i64, x: &str, first: bool| match (k, first) {
-                    (0, _) => String::new(),
-                    (k, true) => format!("{}{x}", if k == 1 && !x.is_empty() { String::new() } else { k.to_string() }),
-                    (k, false) => format!(" {} {}{x}", if k < 0 { '-' } else { '+' }, if k.abs() == 1 && !x.is_empty() { String::new() } else { k.abs().to_string() }),
-                };
-                format!("Waypoint {} centred on {}, a root of {}{}{}", i + 1, complex_text(re, im), term(a, "x²", true), term(b, "x", false), term(c, "", false))
+                format!("Waypoint {} centred on {}, a root of {}", i + 1, complex_text(re, im), quadratic_text(abc))
             }
             None => format!("No quadratic number near waypoint {} (it's too close to the real axis?)", i + 1),
         }

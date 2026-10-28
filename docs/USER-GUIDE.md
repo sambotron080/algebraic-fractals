@@ -19,7 +19,7 @@
 ## Getting started
 
 1. Double-click **Algebraic Fractals.exe** (on a Mac, **Algebraic Fractals.app**: see [MAC.md](MAC.md) the first time). If Windows says "Windows protected your PC", click **More info → Run anyway**: the program isn't signed.
-2. The window shows the whole picture, from −1.5 to 1.5 in each direction, and renders it in a fraction of a second.
+2. The window shows the region around i (from 0.25i to 1.75i, up and down), above the bright points on the real axis, and renders it in a fraction of a second.
 3. **Click** anywhere to move the yellow box there, then press **▶ Run** (or Enter) to zoom into it. Or **double-click** to zoom straight in. The **mouse wheel** changes how far each zoom goes.
 4. **auto** next to **Max coefficient**, in the strip under the toolbar, is ticked at first: it keeps the star density steady however deep you go.
 5. When you find something you like, press **⭐ Save location** (Ctrl+L), give it a name, and file it in a group.
@@ -35,7 +35,7 @@
 │ 💾 Save image │ Polynomials...  🎨 Colours... │ 🎬 Video ▾ │ ☰                         │  toolbar
 ├────────────────────────────────────────────────────────────────────────────────┤
 │ Order [3] ☐ auto   Max coefficient [12] ☑ auto   Root density [4] (predicted ~4.1) │
-│ Resolution [256 x 256]      ▓▓▓▓▓░░ 62%  ~2 s left  [Cancel]                       │  settings strip
+│ Image [square] [512 x 512]      ▓▓▓▓▓░░ 62%  ~2 s left  [Cancel]                   │  settings strip
 ├────────────────────────────────────────────────────────────────────────────────┤
 │                                   the image                                    │
 ├────────────────────────────────────────────────────────────────────────────────┤
@@ -52,7 +52,7 @@ Only the settings you change most often are on screen. Everything else is in **p
 | click | choose the centre of the next zoom (the yellow box moves there) |
 | double-click | zoom in there at once |
 | mouse wheel | change the zoom factor (how far each zoom goes), from ×1 to ×1000 |
-| right-click | **Zoom in here**, **Centre here**, or **Copy this point** |
+| right-click | **Zoom in here**, **Centre here**, **🌸 Zoom into the flower here**, **🌸 Centre on the flower here**, or **Copy this point** |
 | hover | the status bar shows the point, how close it is to an algebraic number (the residual), and the polynomial behind it, with its length (sum of the coefficients' sizes) and height (the largest) |
 | **Enter** | zoom into the yellow box |
 | **Backspace** | Back |
@@ -69,7 +69,8 @@ The keys work when no text box is being typed in.
 |---|---|
 | **▶ Run** | zoom into the yellow box (Enter, or double-click on the image) |
 | **⏴ Back** | the previous view (the last 30 are remembered), rendered again |
-| **🏠 Home** | back to the whole picture, −1.5 … 1.5 |
+| **🏠 Home** | back to the home view: centred on i, half-width 0.75 |
+| **🌸 Snap to flowers** | when on, a click puts the zoom box on the centre of the largest flower near where you clicked (the simplest quadratic number within the box). The status bar names its polynomial. |
 | **➖ Zoom out** | zoom out by the zoom factor (at least ×2), keeping the centre |
 | **🔄 Refresh** | render the view again, e.g. after changing the resolution |
 | **View...** | the view's exact centre and half-width, which you can type into and **Go** to, or **Copy**; the zoom factor; **Show zoom box** |
@@ -83,7 +84,7 @@ The keys work when no text box is being typed in.
 
 While a video renders, its progress shows at the right of the toolbar; click it to show the video window.
 
-**The View popup.** *Centre* and *Half-width* show the current view exactly (the half-width is the distance from the centre to the edge). Type new values and press **Enter** or **Go** to jump there. The centre accepts forms like `0.5+0.8i`, `-1.2 - 3e-4i`, `2i`, `-i`, `0.3` or `0.5, 0.8`. *Next* shows where the next zoom goes. Below a half-width of about 10⁻¹² of the centre's size, 64-bit numbers run out of precision and the picture turns blocky; an orange note warns you.
+**The View popup.** *Centre* and *Half-width* show the current view exactly (the half-width is the distance from the centre to the edge). Type new values and press **Enter** or **Go** to jump there. The centre accepts forms like `0.5+0.8i`, `-1.2 - 3e-4i`, `2i`, `-i`, `0.3` or `0.5, 0.8`. *Next* shows where the next zoom goes. **🌸 Centre on flower** moves the view's centre exactly onto the centre of the largest flower near it. For a widescreen or window-filling image, the half-width is half the image's *height* (the box says **Half-height**), as in videos. Below a half-width of about 10⁻¹² of the centre's size, 64-bit numbers run out of precision and the picture turns blocky; an orange note warns you.
 
 ---
 
@@ -96,9 +97,9 @@ Each pixel shows how close it is to a root of *any* polynomial `c0 + c1·x + …
 | **Order** | strip | the highest power of `x`. Higher orders reveal many more algebraic numbers (denser, finer patterns) but are slower. |
 | **Max coefficient** | strip | the largest coefficient size, e.g. 12 allows −12 to 12. Larger values add more points. Up to 1 000 000, since the sparse sets need large values to have many members. |
 | **Root density** | strip | the target for **auto**, in algebraic numbers per 100 square pixels |
-| **Resolution** | strip | image size, 128 × 128 to 4096 × 4096 |
+| **Image** | strip | the image's shape and size: **square** (128 × 128 to 4096 × 4096), **widescreen 16:9** (640 × 360 to 3840 × 2160), or **fill the window**, which renders at the window's own size and renders again when you resize the window |
 | **Coefficients** | Polynomials popup | which sizes are allowed, each with either sign, and 0: **integers**, or the sparser **1 and primes**, **Fibonacci numbers**, **odd numbers**, **triangular numbers**, **squares**, **cubes** and **powers of 2**. Each gives its own patterns. Hover over a set to see its first members. |
-| **0 can be a root** | Polynomials popup | allow the constant term to be 0 (polynomials like `x³ − 2x`), so 0 itself lights up. Untick it and 0 sits in a dark hole. |
+| **0 can be a root** | Polynomials popup | count 0 as an algebraic number (the root of the polynomial `x`), so it lights up. Untick it and 0 sits in a dark hole. Polynomials with a spare factor of x, like `x³ − 2x`, are never shown: the simpler `x² − 2` is. |
 
 Changing the order, the max coefficient or a Polynomials setting re-renders the view by itself, once you stop changing it for a moment. Changing the **resolution** doesn't: explore at a low resolution, then raise it and press **Refresh** (or zoom in) when you've found something.
 
@@ -227,6 +228,7 @@ A video zooms (and pans) smoothly from a **start**, through any number of **wayp
 It's a window of its own: put it beside the main window or on a second screen. Closing it doesn't lose anything (it asks about unsaved changes), and a render carries on while it's closed.
 
 **The waypoint strip** is always there, whatever tab is open: a small render of every waypoint's frame, exactly as the video shows it there, with its number, name, half-width and max coefficient ("auto" if auto chose it; an orange ⚠ if auto fell short). Between them, how long each part of the video takes. They're small so that they render quickly, even for deep views with large max coefficients, and they update as you change things: a search setting re-renders the affected thumbnails a moment after you stop changing it (the old picture stays, dimmed, until then), and a colour change recolours them at once.
+- The other waypoints that are inside a thumbnail's frame are marked on it: a cross with the waypoint's number, and the box of its own frame once it's big enough to see (the selected waypoint in yellow). Look at a frame and the Colour tab's example frame are marked the same way.
 - **Click** a thumbnail to select that waypoint. **Double-click** to look at it in the main window. **Right-click** for **Show in the explorer**, **Set to the explorer's view**, **Insert halfway after** and **Delete**.
 - **size** makes the thumbnails bigger.
 - A thumbnail shows the frame shrunk, so its stars look denser than the video's.
@@ -270,7 +272,7 @@ The flower keeps its exact size and shape, but the stars around it get about **4
 
 ### Colour tab
 
-**One colouring for the whole video**: the same controls as the main window's [Colours](#colours). **Copy the explorer's colours** and **Use these colours in the explorer** move colours between the two windows.
+**One colouring for the whole video**: the same controls as the main window's [Colours](#colours), with an **example frame** of the video beside them, recoloured as you change them. Its slider picks any frame (it's the same frame as the Path tab's Look at a frame). **Copy the explorer's colours** and **Use these colours in the explorer** move colours between the two windows.
 
 **Colour scale for the whole video.** Normally each frame is scaled to its own pixels: its brightness by its own percentiles (max %, min %), and for length or height, the colormap runs from the frame's lowest value to its highest. So every frame is well exposed, but the scale moves a little from frame to frame.
 - **Steady brightness** (off by default): the brightness percentiles are measured at the waypoints and change steadily from one to the next, instead of each frame's own, so the brightness doesn't pulse as stars come in. On a ×10 zoom into a flower, it made the overall brightness about 4 times steadier. The waypoints' frames are rendered first, which adds a few frames' time.

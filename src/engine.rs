@@ -267,6 +267,9 @@ pub struct Plan {
     /// lattice search with the lattice on powers (0, 1) for |X| <= 1 and on
     /// (n-1, n) for |X| > 1; None where it isn't worthwhile
     lattice: Option<[LatSplit; 2]>,
+    /// 0 counts as a root (Coefs::zero_root): a render also tries the polynomial x,
+    /// residual |X|, which wins wherever it's at least as close (see `add_root_zero`)
+    root_zero: bool,
 }
 
 fn primes_upto(n: i32) -> Vec<i32> {
@@ -305,18 +308,15 @@ impl Plan {
         let base = coefs.values(); // never empty: every set contains +-1
         let nterms = order + 1;
 
-        // c0 = 0 is excluded unless zero_root: then p(x) = x*q(x), which only adds the
-        // root 0 or a lower-order polynomial scaled by |X|. The legacy quadratic
-        // excluded c1 = 0 instead.
+        // c0 = 0 is never searched: p(x) = x*q(x) only adds the root 0 to q's, and near
+        // q's roots inside the unit circle |p(X)| = |X|*|q(X)| would beat the simpler q.
+        // With zero_root, the root 0 comes from the polynomial x alone (see
+        // `root_zero`). The legacy quadratic excluded c1 = 0 instead.
         let excluded = if legacy { 1 } else { 0 };
         let lists: Vec<Vec<i32>> = (0..nterms)
             .map(|i| {
                 if i == excluded {
-                    let mut l: Vec<i32> = base.iter().copied().filter(|&c| c != 0).collect();
-                    if coefs.zero_root && !legacy {
-                        l.insert(l.partition_point(|&c| c < 0), 0);
-                    }
-                    l
+                    base.iter().copied().filter(|&c| c != 0).collect()
                 } else {
                     base.clone()
                 }
@@ -373,7 +373,8 @@ impl Plan {
             (fits && ls.iter().all(|l| l.cost * 2.0 < cost(split))).then_some(ls)
         };
 
-        Ok(Plan { nterms, split, chunk, table_powers: (0..split).collect(), lists, first_nonneg, max_abs, legacy, lattice })
+        let root_zero = coefs.zero_root && !legacy;
+        Ok(Plan { nterms, split, chunk, table_powers: (0..split).collect(), lists, first_nonneg, max_abs, legacy, lattice, root_zero })
     }
 
     /// Number of entries in the direct search's table (in one chunk of it, if it's
@@ -1616,7 +1617,29 @@ fn render_with(
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
-    Some(Render { width: w, height: h, nterms: t, re_axis, im_axis, residual, coeffs })
+    let mut r = Render { width: w, height: h, nterms: t, re_axis, im_axis, residual, coeffs };
+    if plan.root_zero {
+        add_root_zero(&mut r);
+    }
+    Some(r)
+}
+
+/// With 0 as a root: the polynomial x (residual |X|) wherever it's at least as close as
+/// the best polynomial found. x is as simple as a polynomial gets, so it also wins ties.
+fn add_root_zero(r: &mut Render) {
+    let t = r.nterms;
+    for (row, &im) in r.im_axis.iter().enumerate() {
+        for (col, &re) in r.re_axis.iter().enumerate() {
+            let i = row * r.width + col;
+            let ax = re.hypot(im);
+            if ax <= r.residual[i] * (1.0 + 1e-12) {
+                r.residual[i] = ax;
+                let c = &mut r.coeffs[i * t..(i + 1) * t];
+                c.fill(0);
+                c[1] = 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1642,9 +1665,37 @@ mod tests {
         for s in CoefSet::ALL {
             assert_eq!(up(s, 1), [1], "{s:?}");
         }
+        // c0 = 0 is never searched (0 as a root comes from the polynomial x)
         let plan = Plan::new(2, &co(CoefSet::Squares, 4, false, true), false).unwrap();
-        assert_eq!(plan.lists[0], [-4, -1, 0, 1, 4]);
+        assert_eq!(plan.lists[0], [-4, -1, 1, 4]);
         assert_eq!(plan.lists[1], [-4, -1, 1, 4]);
+        assert!(plan.root_zero);
+    }
+
+    /// With 0 as a root, every pixel gets either a polynomial with c0 ≠ 0 or x itself,
+    /// never x·q(x) (which near q's roots inside the unit circle would beat q), and the
+    /// residual is the smaller of the two.
+    #[test]
+    fn zero_root_gives_the_simplest_polynomial() {
+        let plan = Plan::new(3, &co(CoefSet::Ints, 6, true, true), false).unwrap();
+        for method in [Method::Rows, Method::Tiles(8)] {
+            let (re, im) = Region::square(0.1, 0.4, 0.6, 24).axes();
+            let r = render_with(&plan, re.clone(), im.clone(), 2, &AtomicBool::new(false), &AtomicUsize::new(0), method).unwrap();
+            let mut x_wins = 0;
+            for (row, &y) in im.iter().enumerate() {
+                for (col, &x) in re.iter().enumerate() {
+                    let i = row * r.width + col;
+                    let c = r.coeffs_at(row, col);
+                    let want = brute(&plan, C64::new(x, y)).min(x.hypot(y));
+                    assert!((r.residual[i] - want).abs() <= 1e-12 * (1.0 + want), "{method:?} at {x}+{y}i: {} vs {want}", r.residual[i]);
+                    if c[0] == 0 {
+                        assert_eq!(c, [0, 1, 0, 0], "only x itself may have c0 = 0");
+                        x_wins += 1;
+                    }
+                }
+            }
+            assert!(x_wins > 0, "the region around 0 shows the root 0");
+        }
     }
 
     /// min |p(X)| by trying every polynomial (except p = 0).

@@ -46,8 +46,9 @@ pub fn repaint_after(ctx: &egui::Context, ms: u64) {
     ctx.request_repaint_after_for(Duration::from_millis(ms), egui::ViewportId::ROOT);
 }
 
-/// The whole picture, −1.5 … 1.5: where the explorer starts, and a new video's start.
-pub const HOME: View = View { cr: 0.0, ci: 0.0, hw: 1.5 };
+/// Where the explorer starts, and a new video's start: centred on i, half-width 0.75,
+/// clear of the bright points on the real axis.
+pub const HOME: View = View { cr: 0.0, ci: 1.0, hw: 0.75 };
 
 /// The flower around (1 + i√2)/3, a root of 3x² - 2x + 1.
 pub const FLOWER: View = View { cr: 1.0 / 3.0, ci: 0.4714045207910317, hw: 0.002 };

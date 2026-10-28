@@ -179,7 +179,7 @@ Owned by the app and used by the explorer and the video window:
 │ Polynomials…  Colours… │ Video ▾ │ ☰                    video: frame 120 of 900, ~3 min  │  toolbar
 ├───────────────────────────────────────────────────────────────────────────────────────┤
 │ Order [ 3 ] ☐ auto   Max coefficient [ 12 ] ☐ auto   Root density [ 4 ] per 100 px²   │
-│ (predicted ~4.1)   Resolution [ 256 ▾ ]        ▓▓▓▓▓▓░░░ 62%  ~2 s left  [Cancel]     │  settings strip
+│ (predicted ~4.1)   Image [square ▾] [512 x 512 ▾]        ▓▓▓▓▓▓░░░ 62%  ~2 s left  [Cancel]     │  settings strip
 ├───────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                       │
 │                                  the image                                            │
@@ -222,7 +222,7 @@ Enter in a text box does that box's own action (Go, Save, and so on), as describ
 ### 6.1 Views and coordinates
 
 - A **view** is a centre `cr + ci·i` and a **half-width** `hw`.
-- In the explorer, the image is square: it spans `cr ± hw` and `ci ± hw`.
+- In the explorer, the image is square, widescreen (16:9) or the shape of the window (see [7.3](#73-settings-strip)). As in a video, `hw` is half its **height**: it spans `ci ± hw`, and `cr ± hw·W/H` across (just `cr ± hw` when square).
 - In a video, `hw` is half the frame's **height**. A widescreen frame also spans `cr ± hw·16/9` horizontally. So a location saved in the explorer is the same height in a video, with more at the sides.
 - Row 0 of a render is the top: the largest imaginary part.
 - The **home** view is centre 0, half-width 2.
@@ -240,7 +240,7 @@ Enter in a text box does that box's own action (Go, Save, and so on), as describ
 | **Order** | 1–16 | the highest power of `x` | explorer: settings strip; video: Polynomials tab |
 | **Max coefficient** | 1–1 000 000 | the largest allowed `|c|` | explorer: settings strip; video: per waypoint, Polynomials tab |
 | **Coefficients** | integers; 1 and primes; Fibonacci numbers; odd numbers; triangular numbers; squares; cubes; powers of 2 | which sizes are allowed, each with either sign, and 0. Every set contains 1. In the dropdown, hovering a set shows its first members, e.g. `0, ±1, ±2, ±3, ±5, ...` | explorer: Polynomials popup; video: Polynomials tab |
-| **0 can be a root** | on/off (default on) | whether `c0` may be 0 (polynomials `x·q(x)`), so that 0 itself lights up. Off: `c0` is never 0 and 0 sits in a dark hole. | as Coefficients |
+| **0 can be a root** | on/off (default on) | whether 0 counts as an algebraic number, so that it lights up. On, the polynomial `x` is tried at every pixel (residual \|X\|) as well; off, 0 sits in a dark hole. **(Changed)** Polynomials with `c0` = 0, `x·q(x)`, are never searched: near q's roots inside the unit circle they'd beat the simpler q, so pixels showed polynomials with a spare factor of x. | as Coefficients |
 
 **(Changed)** 0 is always an allowed coefficient: the old "allow 0" setting is gone. Settings, projects and old paths that turned it off are read with it on. (The command line keeps `--nozero`.)
 
@@ -343,7 +343,7 @@ A **location** is a saved view: a **name**, a **group**, a **centre** and a **ha
 
 ### 7.1 On start
 
-It shows the home view (−1.5 … 1.5), order 3, integer coefficients with auto max coefficient on (root density 4) and 0 can be a root, resolution 512 × 512, zoom × 4, default colouring, no popups open. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
+It shows the home view (centred on i, half-width 0.75: clear of the bright points on the real axis), order 3, integer coefficients with auto max coefficient on (root density 4) and 0 can be a root, a square image of 512 × 512, zoom × 4, default colouring, no popups open. It starts rendering straight away, which takes a fraction of a second. (With remembered settings: the last ones instead.)
 
 ### 7.2 Toolbar
 
@@ -356,7 +356,8 @@ Left to right, as icon-and-word buttons, with hover text for each:
 | **🏠 Home** (Home key) | back to the home view |
 | **➖ Zoom out** | half-width × max(zoom, 2), same centre |
 | **🔄 Refresh** | render the current view again with the current settings. Needed after changing the resolution ([7.3](#73-settings-strip)). |
-| **View…** | opens the View popup ([7.5](#75-view-popup)) |
+| **🌸 Snap to flowers** **(New)** | a toggle (remembered). When on, a click puts the zoom box's centre on the simplest quadratic number within the zoom box's half-height of the clicked point (`video::simplest_quadratic`): the centre of the largest flower there. The status names its polynomial, or says there's none (too close to the real axis). |
+| **View…** | opens the View popup ([7.5](#75-view-popup)), which also has **🌸 Centre on flower** **(New)**: the view's centre onto the simplest quadratic number within half its half-width |
 | **⭐ Save location** (Ctrl+L) | opens the Save location popup ([7.4](#74-save-location-popup)). Greyed until an image is shown. |
 | **📂 Locations…** | opens the Locations popup ([7.8](#78-locations-popup)) |
 | **💾 Save image** (Ctrl+S) | saves the shown image as a PNG straight away ([7.13](#713-saving-images)). Greyed until an image is shown. |
@@ -378,12 +379,16 @@ The only search settings on screen. Left to right:
 3. **Root density:** a number box (0.01–1000, default 4), then "per 100 px²". It's the target for auto, so it's greyed while neither auto is on.
    - After it, in grey: "(predicted ~4.1)", the predicted density of the view with the current settings, to 2 significant figures. Hover: "Estimated before rendering, from the number of allowed polynomials and where the roots of random polynomials lie. Usually within about 20%."
    - When auto falls short, an orange **⚠** follows. Its hover is the note, e.g. "Auto: a max coefficient above 1000000 would get closer, but has too many polynomials to search".
-4. **Resolution:** a dropdown of 128, 256, 384, 512, 768, 1024, 1536, 2048 and 4096, all square. Default 256. Hover: "Pixels across. Changing it doesn't re-render: press ⟳ Refresh or zoom in to use it."
+4. **Image** **(Changed)**: the shape, then the size:
+   - **square**: 128, 256, 384, 512, 768, 1024, 1536, 2048 or 4096 pixels (default 512);
+   - **widescreen 16:9**: heights 360, 540, 720, 1080, 1440 or 2160 (640 × 360 to 3840 × 2160);
+   - **fill the window**: the image area's own size in pixels (shown in grey). It re-renders by itself when the window changes size, once the size has stayed the same for 400 ms.
+   Hover on the size: "Pixels. Changing it doesn't re-render: press Refresh or zoom in to use it."
 5. **Progress,** while rendering: a progress bar `NN%  ~Ts left` (from the rows finished so far) and **Cancel**. Cancel stops the render, keeps the old image, says "Cancelled", and doesn't re-render for the settings that were pending. While nothing renders, the space is empty.
 
 **When it re-renders by itself:**
 - Changing the order, the max coefficient or any setting in the Polynomials popup re-renders the current view. It waits until the value has stayed the same for **400 ms**, so dragging a number doesn't start a render for every step. It keeps the view.
-- Changing the resolution does **not** re-render, so you can explore at low resolution and press Refresh or zoom in to go high. **Decision:** or re-render at once.
+- Changing the square or widescreen size, or the shape, does **not** re-render (except to fill the window), so you can explore at low resolution and press Refresh or zoom in to go high. **Decision:** or re-render at once.
 - **With an auto on,** the auto value is worked out again whenever its inputs change: the view, the resolution, the target, which auto is on, and the other settings. If that changes the order or coefficients, it re-renders (after the same pause).
 - Auto works from the view being *requested*, so a render in progress already has the right value.
 - **The old image stays on screen** until the new one is ready.
@@ -479,7 +484,7 @@ Everything about saved locations. It's a scrolling list of groups, each a collap
 | click | choose the centre of the next zoom (the yellow box moves there) |
 | double-click | choose the centre and Run at once |
 | mouse wheel | change the zoom factor: × 1.15 per notch (`1.15^(dy/40)`), kept within 1–1000. The status bar briefly shows "zoom × 5.3". |
-| right-click | a menu: **Zoom in here**, **Centre here** (same half-width), **Save location here…** (the view centred here, at the current half-width), **Copy this point** (`complex_text` to the clipboard) **(New)** |
+| right-click | a menu **(New)**: **Zoom in here**, **Centre here** (same half-width), **🌸 Zoom into the flower here** and **🌸 Centre on the flower here** (onto the simplest quadratic number within the zoom box's half-height of the point), **Copy this point** (`complex_text` to the clipboard) |
 | hover | the status bar shows the point, its residual, its polynomial, length and height |
 
 - **The zoom box:** yellow (255, 200, 40), 1.5 px. It's the next view's square, with a 12 px cross at its centre. Hidden by unticking **Show zoom box**.
@@ -524,7 +529,7 @@ A **video project** is every setting of one video: the path, the colouring, the 
 
 A new project starts as:
 - **From a group** ([9](#9-how-the-explorer-and-videos-work-together)): the group's locations, in order, as the waypoints: the first is the start, the last the finish. The project is named after the group.
-- **Otherwise** ("New video"): the start is the home view (centre 0, half-width 2), and the finish is the explorer's current view. If the explorer is at the home view, the finish is the flower around (1 + i√2)/3, a root of 3x² − 2x + 1: centre 1/3 + (√2/3)i, half-width 0.002. Named "my zoom".
+- **Otherwise** ("New video"): the start is the home view (centre i, half-width 0.75), and the finish is the explorer's current view. If the explorer is at the home view, the finish is the flower around (1 + i√2)/3, a root of 3x² − 2x + 1: centre 1/3 + (√2/3)i, half-width 0.002. Named "my zoom".
 - **Either way:**
   - every waypoint's max coefficient on auto, pan speed 1% per frame, keep flower size off;
   - zoom per frame 1.01;
@@ -603,7 +608,7 @@ Projects are saved in the settings folder ([11.3](#113-video-projects)), so they
 - **Zoom per frame:** × 1.001–4 (default 1.01, 3 decimals). Hover: "How much each frame magnifies the last. 1.01 is slow and smooth, 1.05 is quick."
 - An orange warning if any waypoint's half-width is below 10⁻¹² of its centre's size: "That's beyond 64-bit precision: the deepest frames will look blocky".
 
-**Look at a frame (Decision, default on):** the strip only shows the waypoints. To check the frames in between (fades, the max coefficient between waypoints), the Path tab ends with:
+**Look at a frame (Decision, default on; also the Colour tab's example frame, [8.5](#85-colour-tab)):** the strip only shows the waypoints. To check the frames in between (fades, the max coefficient between waypoints), the Path tab ends with:
 - a **frame** slider over the whole video, with **|<** and **>|**, and the frame's time (`0:12.4`);
 - that frame, rendered exactly as the video will render it (patch windows with reuse, fades, smoothing and the colour scale), at the video's full resolution, shown up to 960 px wide (so its render time calibrates the estimate well);
 - in grey: `Frame k: centre <fmt_complex>, half-width 1.2345e-3, max coefficient 43.6 (fading from 41 to 46: 52%), rendered in 0.42 s`;
@@ -611,7 +616,7 @@ Projects are saved in the settings folder ([11.3](#113-video-projects)), so they
 
 ### 8.5 Colour tab
 
-**One colouring for the whole video (Changed).** The colour controls of [6.4](#64-colour-controls), applied to every frame. The old per-waypoint settings and their blending between waypoints are gone. Changes recolour the waypoint strip (and the frame preview) at once, without searching again.
+**One colouring for the whole video (Changed).** The colour controls of [6.4](#64-colour-controls), applied to every frame, on the left; **(New)** on the right, an **example frame**: the same frame and slider as the Path tab's "Look at a frame", recoloured as the controls change. The old per-waypoint settings and their blending between waypoints are gone. Changes recolour the waypoint strip (and the frame preview) at once, without searching again.
 
 Buttons at the top:
 - **Copy the explorer's colours:** replaces this colouring with the explorer's.
@@ -698,6 +703,7 @@ Under the table, in grey: the output's full path, e.g. `C:\Users\…\Videos\Alge
 Always shown, under the tabs, whatever tab is open. It's the user's way to see the whole video at a glance while changing settings.
 
 - **One thumbnail per waypoint,** left to right in order, scrolling sideways when they don't fit. Each is the waypoint's frame (the exact frame the video shows it in), in the video's shape: **160 × 90** for 16:9, 90 × 90 for square. **Decision:** a size control (small 160 / medium 240 / large 320 wide), remembered.
+- **(New)** The other waypoints inside a thumbnail's frame are marked on it, as in the old preview: a cross and the waypoint's number, and its own frame's box once that's big enough to see (the selected waypoint yellow, the others white). The frame preview and the Colour tab's example frame are marked the same way.
 - **Under each:** its number and name (Start, Finish, or its own), then `hw 2.0e-3  max 41` (the max coefficient, with "auto" in grey if auto chose it, or an orange ⚠ if auto fell short).
 - **Between each pair:** an arrow with the segment's duration (`12 s`).
 - **The selected waypoint's thumbnail** has a yellow (255, 200, 40) border. Click a thumbnail to select it (the tables in the Path and Polynomials tabs follow). Double-click: Show in the explorer. Right-click: **Show in the explorer**, **Set to the explorer's view**, **Insert halfway after**, **Delete**.
@@ -963,6 +969,7 @@ The engine is carried over unchanged. These properties are tested and must stay 
   - **ties** within `64·ε·Σ maxcoef·|X|^i` go to the polynomial with the smallest Σ|ci|;
   - the highest nonzero coefficient is made positive;
   - `X = 0` is special-cased.
+  - **(Changed)** `c0 = 0` is never searched. With 0 as a root, the polynomial `x` (residual \|X\|) is tried at every pixel after the search and wins ties, so a pixel's polynomial is never `x·q(x)`: the old engine's `x·q` beat `q` near `q`'s roots inside the unit circle, since \|X·q(X)\| < \|q(X)\| there. (Other reducible polynomials, such as `(x + 1)·q` near `q`'s roots within 1 of −1, can still win; only a factor of x is removed.)
 - **The searches:**
   - meet in the middle, with a bucketed table and pruned queries;
   - the lattice search on two neighbouring powers, which falls back to the direct search near the real axis on a work budget;
@@ -1051,7 +1058,7 @@ Run with `cargo test --release --lib --bins`. Plain `cargo test` also runs the d
 Check in a sample `places.tsv` and `.path` from the old programs as test data (`tests/data/`).
 
 **Equivalence with the old programs:**
-- The command line with the same arguments writes byte-identical `.png` and `.algf` files.
+- The command line with the same arguments writes byte-identical `.png` and `.algf` files, except with `--zeroroot` (see the engine's change to 0 as a root, [12](#12-the-engine-what-must-stay-true)).
 - A short video with the same settings and one colouring gives identical frames (compare the PNG frames).
 
 **GUI checks by hand** before each release:
@@ -1150,7 +1157,8 @@ Each step ends with the tests passing and a commit.
 |---|---|---|
 | `MAX_COEF` | 1 000 000 | largest max coefficient |
 | default target root density | 4 per 100 px² | everywhere |
-| explorer resolutions | 128, 256, 384, 512, 768, 1024, 1536, 2048, 4096 | |
+| explorer sizes | square 128, 256, 384, 512, 768, 1024, 1536, 2048, 4096; widescreen heights 360, 540, 720, 1080, 1440, 2160; or the window's | |
+| home view | centre i, half-width 0.75 | explorer; a new video's start |
 | explorer history | 30 views | Back |
 | zoom factor | 1–1000, default 4, wheel × 1.15 per notch | explorer |
 | settle delay | 400 ms | before an automatic re-render (explorer, waypoint strip, frame preview) |

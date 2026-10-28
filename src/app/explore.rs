@@ -13,14 +13,47 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
+/// Square image sizes.
 pub const RESOLUTIONS: [usize; 9] = [128, 256, 384, 512, 768, 1024, 1536, 2048, 4096];
+/// Widescreen (16:9) image heights.
+pub const WIDE_HEIGHTS: [usize; 6] = [360, 540, 720, 1080, 1440, 2160];
 const HISTORY_LEN: usize = 30;
+
+/// The image's shape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ImageShape {
+    Square,
+    /// 16:9
+    Wide,
+    /// whatever fits the window, at its own pixels
+    Fill,
+}
+
+impl ImageShape {
+    const ALL: [ImageShape; 3] = [ImageShape::Square, ImageShape::Wide, ImageShape::Fill];
+
+    fn name(self) -> &'static str {
+        match self {
+            ImageShape::Square => "square",
+            ImageShape::Wide => "widescreen 16:9",
+            ImageShape::Fill => "fill the window",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            ImageShape::Square => "square",
+            ImageShape::Wide => "wide",
+            ImageShape::Fill => "fill",
+        }
+    }
+}
 
 /// What auto order / max coefficient was worked out from.
 #[derive(Clone, Copy, PartialEq)]
 struct AutoKey {
     view: View,
-    width: usize,
+    size: (usize, usize),
     target: f64,
     auto_order: bool,
     order: usize,
@@ -32,7 +65,9 @@ struct AutoKey {
 pub struct Search {
     pub order: usize,
     pub coefs: Coefs,
+    /// the image's size in pixels
     pub width: usize,
+    pub height: usize,
 }
 
 impl Search {
@@ -42,12 +77,28 @@ impl Search {
     }
 }
 
+/// The region a `w` x `h` image of `view` shows: `hw` is half its height, as in a video
+/// (for a square image, also half its width).
+pub fn image_region(view: View, w: usize, h: usize) -> Region {
+    let hx = view.hw * w as f64 / h.max(1) as f64;
+    Region { re: (view.cr - hx, view.cr + hx), im: (view.ci - view.hw, view.ci + view.hw), width: w.max(2) }
+}
+
 /// The search that auto order / max coefficient would choose for `view` (see
 /// choose_auto), with no limit on the work, as for videos.
 pub fn auto_search(p: &mut algfrac::density::Predictor, s: Search, view: View, target: f64, auto_order: bool) -> (Search, String) {
-    let region = Region::square(view.cr, view.ci, view.hw, s.width);
+    let region = image_region(view, s.width, s.height);
     let (order, coefs, note) = choose_auto(p, s.order, s.coefs, &region, target, auto_order, f64::INFINITY);
     (Search { order, coefs, ..s }, note)
+}
+
+/// The simplest quadratic number within `r` of (x, y), the centre of the largest flower
+/// there, and its polynomial; or why there's none.
+pub fn flower_near(x: f64, y: f64, r: f64) -> Result<(f64, f64, String), String> {
+    match algfrac::video::simplest_quadratic(x, y, r, 1_000_000) {
+        Some((abc, re, im)) => Ok((re, im, quadratic_text(abc))),
+        None => Err("No flower near there (too close to the real axis?)".into()),
+    }
 }
 
 /// A finished render and what it shows.
@@ -176,6 +227,17 @@ pub struct Explorer {
     pub status: String,
     /// when the mouse wheel last changed the zoom factor
     zoom_note: Option<Instant>,
+
+    /// the image's shape and size: the square size, the widescreen height, and the
+    /// window's image area in pixels (for Fill), once known
+    pub shape: ImageShape,
+    pub square: usize,
+    pub wide_height: usize,
+    fill_size: Option<(usize, usize)>,
+    /// a new fill size waiting to be rendered, and since when
+    fill_changed: Option<((usize, usize), Instant)>,
+    /// clicks move the zoom box onto the nearest flower
+    pub snap: bool,
 }
 
 impl Explorer {
@@ -187,11 +249,8 @@ impl Explorer {
             zero: true, // 0 is always an allowed coefficient
             zero_root: s.flag("explore.zero_root").unwrap_or(true),
         };
-        let search = Search {
-            order: s.get::<usize>("explore.order").unwrap_or(3).clamp(1, 16),
-            coefs,
-            width: s.get::<usize>("explore.width").filter(|w| RESOLUTIONS.contains(w)).unwrap_or(512),
-        };
+        let square = s.get::<usize>("explore.width").filter(|w| RESOLUTIONS.contains(w)).unwrap_or(512);
+        let search = Search { order: s.get::<usize>("explore.order").unwrap_or(3).clamp(1, 16), coefs, width: square, height: square };
         let (auto_order, auto_max) = (s.flag("explore.auto_order").unwrap_or(false), s.flag("explore.auto_max").unwrap_or(true));
         Explorer {
             search,
@@ -225,6 +284,21 @@ impl Explorer {
             hover: String::new(),
             status: String::new(),
             zoom_note: None,
+            shape: s.str("explore.shape").and_then(|t| ImageShape::ALL.into_iter().find(|x| x.key() == t)).unwrap_or(ImageShape::Square),
+            square,
+            wide_height: s.get::<usize>("explore.wide_height").filter(|h| WIDE_HEIGHTS.contains(h)).unwrap_or(720),
+            fill_size: None,
+            fill_changed: None,
+            snap: s.flag("explore.snap").unwrap_or(false),
+        }
+    }
+
+    /// The image size the settings ask for (None for Fill until the window is drawn).
+    fn wanted_size(&self) -> Option<(usize, usize)> {
+        match self.shape {
+            ImageShape::Square => Some((self.square, self.square)),
+            ImageShape::Wide => Some((algfrac::video::frame_width(self.wide_height, 16.0 / 9.0), self.wide_height)),
+            ImageShape::Fill => self.fill_size,
         }
     }
 
@@ -234,7 +308,10 @@ impl Explorer {
         s.set("explore.set", c.set.name());
         s.set("explore.max", c.max);
         s.set_flag("explore.zero_root", c.zero_root);
-        s.set("explore.width", self.search.width);
+        s.set("explore.width", self.square);
+        s.set("explore.wide_height", self.wide_height);
+        s.set("explore.shape", self.shape.key());
+        s.set_flag("explore.snap", self.snap);
         s.set_flag("explore.auto_order", self.auto_order);
         s.set_flag("explore.auto_max", self.auto_max);
         s.set("explore.target", self.target_density);
@@ -282,7 +359,7 @@ impl Explorer {
         let s = self.search;
         let key = AutoKey {
             view,
-            width: s.width,
+            size: (s.width, s.height),
             target: self.target_density,
             auto_order: self.auto_order,
             // the inputs, leaving out the setting being chosen
@@ -302,13 +379,15 @@ impl Explorer {
         if let Some(job) = self.job.take() {
             job.cancel.store(true, Ordering::Relaxed);
         }
+        if let Some((w, h)) = self.wanted_size() {
+            (self.search.width, self.search.height) = (w, h);
+        }
         self.apply_auto(shared, view);
         let search = self.search;
         self.requested = view;
         self.applied = search.key();
         self.changed = None;
-        let region = Region::square(view.cr, view.ci, view.hw, search.width);
-        let (re, im) = region.axes();
+        let (re, im) = image_region(view, search.width, search.height).axes();
         let cancel = Arc::new(AtomicBool::new(false));
         let rows = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = mpsc::channel();
@@ -398,7 +477,7 @@ impl Explorer {
             v.cr,
             v.ci,
             v.hw,
-            sh.render.width,
+            if sh.render.width == sh.render.height { sh.render.width.to_string() } else { format!("{}x{}", sh.render.width, sh.render.height) },
             st.by.short(),
             st.cmap.name(),
             if st.by == ColourBy::Power { format!("_n{}", st.n) } else { String::new() },
@@ -465,8 +544,33 @@ impl Explorer {
     pub fn update(&mut self, ctx: &egui::Context, shared: &mut Shared, video: &VideoInfo) -> Option<ToVideo> {
         self.poll(ctx);
         if self.shown.is_none() && self.job.is_none() && self.status.is_empty() {
-            let v = self.requested;
-            self.start(ctx, shared, v); // the first render
+            if self.wanted_size().is_some() {
+                let v = self.requested;
+                self.start(ctx, shared, v); // the first render
+            } else {
+                ctx.request_repaint(); // (Fill: once the window's size is known)
+            }
+        }
+        // filling the window: a new size (the window resized, or Fill just chosen)
+        // re-renders once it has stayed the same for a moment
+        if let (ImageShape::Fill, Some(size), Some(sh), None) = (self.shape, self.fill_size, &self.shown, &self.job) {
+            if (sh.render.width, sh.render.height) != size {
+                match self.fill_changed {
+                    Some((s, t)) if s == size => {
+                        if t.elapsed() >= Duration::from_millis(400) {
+                            self.fill_changed = None;
+                            let v = self.current_view();
+                            self.start(ctx, shared, v);
+                        } else {
+                            ctx.request_repaint_after(Duration::from_millis(50));
+                        }
+                    }
+                    _ => {
+                        self.fill_changed = Some((size, Instant::now()));
+                        ctx.request_repaint_after(Duration::from_millis(50));
+                    }
+                }
+            }
         }
 
         // order / coefficient changes re-render the current region (after a short pause,
@@ -634,7 +738,7 @@ impl Explorer {
             if ui.add_enabled(!self.history.is_empty(), egui::Button::new("⏴ Back")).on_hover_text("The previous view (Backspace)").clicked() {
                 *action = Some(Action::Back);
             }
-            if ui.button("🏠 Home").on_hover_text("Back to the whole picture, -1.5..1.5 (Home key)").clicked() {
+            if ui.button("🏠 Home").on_hover_text("Back to the home view: centred on i, half-width 0.75 (Home key)").clicked() {
                 *action = Some(Action::Home);
             }
             if ui.button("➖ Zoom out").on_hover_text("Zoom out by the zoom factor (at least x2), keeping the centre").clicked() {
@@ -642,6 +746,16 @@ impl Explorer {
             }
             if ui.button("🔄 Refresh").on_hover_text("Render this view again with the current settings\n(needed after changing the resolution)").clicked() {
                 *action = Some(Action::Refresh);
+            }
+            if ui
+                .add(egui::Button::new("🌸 Snap to flowers").selected(self.snap))
+                .on_hover_text(
+                    "When on, a click puts the zoom box on the centre of the largest flower near it: the simplest\n\
+                     quadratic number within the box. Right-click on the image to centre the view on a flower.",
+                )
+                .clicked()
+            {
+                self.snap = !self.snap;
             }
             ui.separator();
             if popup(ui, self.is_open(Popup::View), "View...", "The view's exact centre and half-width, and the zoom factor") {
@@ -793,7 +907,7 @@ impl Explorer {
             .response
             .on_disabled_hover_text("The target for auto: tick auto order or auto max coefficient to use it");
             let view = self.requested;
-            let region = Region::square(view.cr, view.ci, view.hw, self.search.width);
+            let region = image_region(view, self.search.width, self.search.height);
             let dens = shared.predictor.per_pixel(self.search.order, &self.search.coefs, &region);
             ui.weak(format!("(predicted ~{})", sig(dens * 100.0))).on_hover_text(
                 "Algebraic numbers per 100 px² in this view, estimated before rendering from the number\n\
@@ -803,16 +917,47 @@ impl Explorer {
                 ui.colored_label(ORANGE, "⚠").on_hover_text(format!("Auto: {}", self.auto_note));
             }
             ui.add_space(12.0);
-            ui.label("Resolution");
-            egui::ComboBox::from_id_salt("res")
-                .selected_text(format!("{0} x {0}", self.search.width))
+            ui.label("Image");
+            egui::ComboBox::from_id_salt("shape")
+                .selected_text(self.shape.name())
                 .show_ui(ui, |ui| {
-                    for r in RESOLUTIONS {
-                        ui.selectable_value(&mut self.search.width, r, format!("{r} x {r}"));
+                    for s in ImageShape::ALL {
+                        ui.selectable_value(&mut self.shape, s, s.name());
                     }
                 })
                 .response
-                .on_hover_text("Pixels across. Changing it doesn't re-render: press Refresh or zoom in to use it.");
+                .on_hover_text("Square, widescreen, or the size of the window's image area (re-rendered when the window changes size)");
+            let tip = "Pixels. Changing it doesn't re-render: press Refresh or zoom in to use it.";
+            match self.shape {
+                ImageShape::Square => {
+                    egui::ComboBox::from_id_salt("res")
+                        .selected_text(format!("{0} x {0}", self.square))
+                        .show_ui(ui, |ui| {
+                            for r in RESOLUTIONS {
+                                ui.selectable_value(&mut self.square, r, format!("{r} x {r}"));
+                            }
+                        })
+                        .response
+                        .on_hover_text(tip);
+                }
+                ImageShape::Wide => {
+                    let w = |h: usize| algfrac::video::frame_width(h, 16.0 / 9.0);
+                    egui::ComboBox::from_id_salt("wide res")
+                        .selected_text(format!("{} x {}", w(self.wide_height), self.wide_height))
+                        .show_ui(ui, |ui| {
+                            for h in WIDE_HEIGHTS {
+                                ui.selectable_value(&mut self.wide_height, h, format!("{} x {h}", w(h)));
+                            }
+                        })
+                        .response
+                        .on_hover_text(tip);
+                }
+                ImageShape::Fill => {
+                    if let Some((w, h)) = self.fill_size {
+                        ui.weak(format!("{w} x {h}"));
+                    }
+                }
+            }
             if let Some(job) = &self.job {
                 ui.add_space(12.0);
                 let done = job.rows.load(Ordering::Relaxed);
@@ -830,6 +975,10 @@ impl Explorer {
     /// Draws the fractal and handles mouse input on it.
     fn image(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let full = ui.available_rect_before_wrap();
+        // the image area in pixels, for Fill
+        let ppp = ui.ctx().pixels_per_point();
+        let size = ((full.width() * ppp).round().max(16.0) as usize, (full.height() * ppp).round().max(16.0) as usize);
+        self.fill_size = Some(size);
         let (Some(sh), Some(tex)) = (self.shown.take(), self.texture.as_ref().map(|t| t.id())) else {
             ui.centered_and_justified(|ui| ui.label("Rendering..."));
             return;
@@ -847,25 +996,36 @@ impl Explorer {
         painter.image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
 
         let v = sh.view;
+        // half the width and half the height of the view
+        let (hx, hy) = (v.hw * sh.render.width as f64 / sh.render.height as f64, v.hw);
         let to_complex = move |p: Pos2| -> (f64, f64) {
             let u = ((p.x - rect.min.x) / rect.width()) as f64;
             let t = ((p.y - rect.min.y) / rect.height()) as f64;
-            (v.cr - v.hw + 2.0 * v.hw * u, v.ci + v.hw - 2.0 * v.hw * t)
+            (v.cr - hx + 2.0 * hx * u, v.ci + hy - 2.0 * hy * t)
         };
         let to_screen = |re: f64, im: f64| -> Pos2 {
             pos2(
-                rect.min.x + ((re - (v.cr - v.hw)) / (2.0 * v.hw)) as f32 * rect.width(),
-                rect.min.y + (((v.ci + v.hw) - im) / (2.0 * v.hw)) as f32 * rect.height(),
+                rect.min.x + ((re - (v.cr - hx)) / (2.0 * hx)) as f32 * rect.width(),
+                rect.min.y + (((v.ci + hy) - im) / (2.0 * hy)) as f32 * rect.height(),
             )
         };
 
-        // mouse
+        // mouse: a click chooses the next zoom's centre (on the nearest flower, when snapping)
         if let Some(p) = resp.interact_pointer_pos() {
-            if resp.clicked() {
-                self.target = Some(to_complex(p));
+            if resp.clicked() || resp.double_clicked() {
+                let (x, y) = to_complex(p);
+                self.target = Some((x, y));
+                if self.snap {
+                    match flower_near(x, y, v.hw / self.zoom) {
+                        Ok((re, im, poly)) => {
+                            self.target = Some((re, im));
+                            self.status = format!("Snapped to the flower at {}, a root of {poly}", complex_text(re, im));
+                        }
+                        Err(e) => self.status = e,
+                    }
+                }
             }
             if resp.double_clicked() {
-                self.target = Some(to_complex(p));
                 *action = Some(Action::Run);
             }
         }
@@ -883,6 +1043,7 @@ impl Explorer {
         }
         let zoom = self.zoom;
         let mut menu_action = None;
+        let mut flower = None; // (the half-width to go to, around which point)
         resp.context_menu(|ui| {
             let Some((re, im)) = self.loc.right_click else { return };
             if ui.button("Zoom in here").clicked() {
@@ -893,11 +1054,31 @@ impl Explorer {
                 menu_action = Some(Action::Go(View { cr: re, ci: im, hw: v.hw }));
                 ui.close_menu();
             }
+            ui.separator();
+            let tip = "The centre of the largest flower near here: the simplest quadratic number within the zoom box";
+            if ui.button("🌸 Zoom into the flower here").on_hover_text(tip).clicked() {
+                flower = Some((v.hw / zoom, re, im));
+                ui.close_menu();
+            }
+            if ui.button("🌸 Centre on the flower here").on_hover_text(tip).clicked() {
+                flower = Some((v.hw, re, im));
+                ui.close_menu();
+            }
+            ui.separator();
             if ui.button("Copy this point").clicked() {
                 ui.ctx().copy_text(complex_text(re, im));
                 ui.close_menu();
             }
         });
+        if let Some((hw, x, y)) = flower {
+            match flower_near(x, y, v.hw / zoom) {
+                Ok((re, im, poly)) => {
+                    menu_action = Some(Action::Go(View { cr: re, ci: im, hw }));
+                    self.status = format!("Centred on the flower at {}, a root of {poly}", complex_text(re, im));
+                }
+                Err(e) => self.status = e,
+            }
+        }
         if menu_action.is_some() {
             *action = menu_action;
         }
@@ -921,9 +1102,9 @@ impl Explorer {
         // zoom box
         if self.show_box {
             let (tr, ti) = self.target.unwrap_or((v.cr, v.ci));
-            let nh = v.hw / self.zoom;
+            let (nx, ny) = (hx / self.zoom, hy / self.zoom);
             let stroke = Stroke::new(1.5_f32, YELLOW);
-            painter.rect_stroke(Rect::from_two_pos(to_screen(tr - nh, ti + nh), to_screen(tr + nh, ti - nh)), 0.0, stroke, egui::StrokeKind::Middle);
+            painter.rect_stroke(Rect::from_two_pos(to_screen(tr - nx, ti + ny), to_screen(tr + nx, ti - ny)), 0.0, stroke, egui::StrokeKind::Middle);
             let c = to_screen(tr, ti);
             painter.line_segment([c - vec2(6.0, 0.0), c + vec2(6.0, 0.0)], stroke);
             painter.line_segment([c - vec2(0.0, 6.0), c + vec2(0.0, 6.0)], stroke);

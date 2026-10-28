@@ -221,6 +221,25 @@ impl VideoWindow {
         self.strip.size
     }
 
+    /// The open tab's name, for the remembered settings.
+    pub fn tab_name(&self) -> &'static str {
+        match self.tab {
+            Tab::Path => "path",
+            Tab::Colour => "colour",
+            Tab::Polynomials => "polynomials",
+            Tab::Output => "output",
+        }
+    }
+
+    pub fn set_tab(&mut self, name: &str) {
+        self.tab = match name {
+            "colour" => Tab::Colour,
+            "polynomials" => Tab::Polynomials,
+            "output" => Tab::Output,
+            _ => Tab::Path,
+        };
+    }
+
     pub fn unsaved(&self) -> bool {
         !self.snapshot && self.saved.as_ref() != Some(&self.project)
     }
@@ -570,7 +589,8 @@ impl VideoWindow {
             }
         }
         // settings changes re-render the preview after a short pause
-        if self.tab == Tab::Path && self.look {
+        // (the Path tab's "Look at a frame", and the Colour tab's example frame)
+        if (self.tab == Tab::Path && self.look) || self.tab == Tab::Colour {
             let want = (self.project.frames.clone(), self.preview_k);
             if self.requested.as_ref() != Some(&want) {
                 match &self.changed {
@@ -1151,14 +1171,34 @@ impl VideoWindow {
             };
             ui.weak(format!("Frame {}: centre {}, half-width {:.4e}, max coefficient {max}, rendered in {:.2} s", pv.k, fmt_complex(v.cr, v.ci), v.hw, pv.secs));
         }
-        if let Some(tex) = &self.preview_tex {
+        if let (Some(tex), Some(pv)) = (&self.preview_tex, &self.preview) {
             let size = tex.size_vec2();
             let s = (ui.available_width().min(960.0) / size.x).min(1.0);
-            ui.image((tex.id(), size * s));
+            let r = ui.image((tex.id(), size * s)).rect;
+            // the other waypoints in this frame (the preview's path, as rendered)
+            let path = &pv.frames.path;
+            let own = (0..path.stops.len()).find(|&j| path.stop_frame(j) == pv.k);
+            mark_waypoints(&ui.painter_at(r), r, &pv.frames.region(pv.k), &path.stops, pv.frames.shape.ratio(), self.sel, own);
         }
     }
 
+    /// The colour controls on the left, and an example frame of the video on the right
+    /// (the same frame as the Path tab's "Look at a frame").
     fn colour_tab(&mut self, ui: &mut egui::Ui, explorer: &mut Explorer) {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(360.0);
+                self.colour_controls_ui(ui, explorer);
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.strong("Example frame");
+                self.look_at_frame(ui);
+            });
+        });
+    }
+
+    fn colour_controls_ui(&mut self, ui: &mut egui::Ui, explorer: &mut Explorer) {
         ui.weak("One colouring for the whole video.");
         ui.horizontal(|ui| {
             if ui.button("Copy the explorer's colours").clicked() {
@@ -1445,6 +1485,8 @@ impl VideoWindow {
                         if !fresh {
                             ui.put(Rect::from_center_size(rect.center(), vec2(20.0, 20.0)), egui::Spinner::new());
                         }
+                        let k = tf.path.stop_frame(i);
+                        mark_waypoints(&ui.painter_at(rect), rect, &tf.region(k), &tf.path.stops, tf.shape.ratio(), self.sel, Some(i));
                         let stroke = if i == self.sel { Stroke::new(2.0_f32, YELLOW) } else { Stroke::new(1.0_f32, Color32::from_gray(70)) };
                         ui.painter().rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
                         if resp.clicked() {
@@ -1569,6 +1611,40 @@ impl VideoWindow {
                 None => {}
             }
         }
+    }
+}
+
+/// Marks the waypoints that are inside a frame (showing `region`, drawn at `rect`): a
+/// cross and its number, and its own frame's box once that's big enough to see. The
+/// selected waypoint is yellow, the others white; `own` (the frame's own waypoint, if
+/// it's one) isn't marked.
+fn mark_waypoints(painter: &egui::Painter, rect: Rect, region: &algfrac::engine::Region, stops: &[View], ratio: f64, sel: usize, own: Option<usize>) {
+    let (re, im) = (region.re, region.im);
+    let to_screen = |x: f64, y: f64| {
+        egui::pos2(rect.min.x + ((x - re.0) / (re.1 - re.0)) as f32 * rect.width(), rect.min.y + ((im.1 - y) / (im.1 - im.0)) as f32 * rect.height())
+    };
+    let px_per_unit = rect.height() as f64 / (im.1 - im.0);
+    let small = rect.height() < 200.0;
+    for (j, v) in stops.iter().enumerate() {
+        if Some(j) == own {
+            continue;
+        }
+        let c = to_screen(v.cr, v.ci);
+        if !rect.contains(c) {
+            continue;
+        }
+        let colour = if j == sel { YELLOW } else { Color32::from_white_alpha(170) };
+        let stroke = Stroke::new(1.2_f32, colour);
+        let half = (v.hw * px_per_unit) as f32;
+        if half > 3.0 && half < rect.height() {
+            let b = Rect::from_center_size(c, vec2(2.0 * half * ratio as f32, 2.0 * half)).intersect(rect);
+            painter.rect_stroke(b, 0.0, stroke, egui::StrokeKind::Middle);
+        }
+        let arm = if small { 4.0 } else { 6.0 };
+        painter.line_segment([c - vec2(arm, 0.0), c + vec2(arm, 0.0)], stroke);
+        painter.line_segment([c - vec2(0.0, arm), c + vec2(0.0, arm)], stroke);
+        let size = if small { 10.0 } else { 13.0 };
+        painter.text(c + vec2(arm, -arm), egui::Align2::LEFT_BOTTOM, format!("{}", j + 1), egui::FontId::proportional(size), colour);
     }
 }
 

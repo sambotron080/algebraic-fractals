@@ -52,6 +52,7 @@ impl App {
             if let Ok(p) = project::open_project(name, &app.shared.videos_dir) {
                 let mut v = VideoWindow::new(p, settings.get("video.thumbs").unwrap_or(0));
                 v.replace(v.project.clone(), String::new());
+                v.set_tab(settings.str("video.tab").unwrap_or("path"));
                 app.video = Some(v);
                 app.video_open = settings.flag("video.open").unwrap_or(false);
             }
@@ -123,6 +124,7 @@ impl App {
             }
             s.set_flag("video.open", self.video_open);
             s.set("video.thumbs", v.thumb_size());
+            s.set("video.tab", v.tab_name());
         }
         let _ = s.store();
     }

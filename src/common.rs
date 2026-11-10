@@ -167,6 +167,34 @@ pub fn old_places_group(text: &str) -> Option<Group> {
     (!locations.is_empty()).then(|| Group { name: OLD_PLACES_GROUP.into(), locations })
 }
 
+/// The group of famous numbers that's added to the saved locations once.
+pub const CONSTANTS_GROUP: &str = "Constants";
+
+/// e and π, on the real axis: transcendental, so no algebraic number is ever exactly
+/// there, however far you zoom (best with the number line on).
+pub fn constants() -> Vec<Location> {
+    let on_axis = |name: &str, x: f64| Location { name: name.into(), view: View { cr: x, ci: 0.0, hw: 0.1 } };
+    vec![on_axis("e", std::f64::consts::E), on_axis("pi", std::f64::consts::PI)]
+}
+
+/// Adds the constants that aren't already in the group `CONSTANTS_GROUP` (by name),
+/// making the group if need be.
+pub fn add_constants(groups: &mut Vec<Group>) {
+    let i = match groups.iter().position(|g| g.name == CONSTANTS_GROUP) {
+        Some(i) => i,
+        None => {
+            groups.push(Group { name: CONSTANTS_GROUP.into(), locations: Vec::new() });
+            groups.len() - 1
+        }
+    };
+    let g = &mut groups[i];
+    for c in constants() {
+        if !g.locations.iter().any(|l| l.name == c.name) {
+            g.locations.push(c);
+        }
+    }
+}
+
 pub fn store_groups(groups: &[Group]) -> std::io::Result<()> {
     std::fs::create_dir_all(settings_dir())?;
     std::fs::write(locations_path(), groups_to_text(groups))
@@ -487,6 +515,21 @@ mod tests {
         let mixed = "g\ta\t0\t0\t1\nh\tb\t0\t0\t1\ng\tc\t0\t0\t1\nbad\tline\n";
         let g = groups_from_text(mixed);
         assert_eq!(g.iter().map(|g| (g.name.as_str(), g.locations.len())).collect::<Vec<_>>(), [("g", 2), ("h", 1)]);
+    }
+
+    #[test]
+    fn constants_are_added_once() {
+        let mut groups = vec![Group { name: UNSORTED.into(), locations: vec![] }];
+        add_constants(&mut groups);
+        add_constants(&mut groups);
+        assert_eq!(groups[1].name, CONSTANTS_GROUP);
+        assert_eq!(groups[1].locations, constants());
+        // they read back exactly, and a constant already there (by name) is kept as it is
+        assert_eq!(groups_from_text(&groups_to_text(&groups)), groups);
+        groups[1].locations.remove(0);
+        groups[1].locations[0].view.hw = 1e-6;
+        add_constants(&mut groups);
+        assert_eq!(groups[1].locations.iter().map(|l| (l.name.as_str(), l.view.hw)).collect::<Vec<_>>(), [("pi", 1e-6), ("e", 0.1)]);
     }
 
     /// A places.tsv written by the old programs comes in as the group Old places.

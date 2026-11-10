@@ -1,6 +1,6 @@
 //! The video window: a project bar, four tabs (Path, Colour, Polynomials, Output), the
 //! waypoint strip (a small render of every waypoint, always in view), and the bottom
-//! bar with the video's size, its render time and Render now.
+//! bar with the video's size, its render time and Render now (or Resume, for a paused video).
 
 use super::explore::{Explorer, VideoInfo};
 use super::widgets::{coef_set_rows, colour_controls, folder_box, max_coef_box, open_with_system, set_texture, show_in_folder, ORANGE, YELLOW};
@@ -10,7 +10,7 @@ use algfrac::common::*;
 use algfrac::engine::{render_axes, work_per_pixel, Coefs, Plan, Render};
 use algfrac::video::frame_width;
 use algfrac::video::frames::*;
-use algfrac::video::make::{make_video, output_paths, FrameDone, VideoSettings};
+use algfrac::video::make::{output_paths, FrameDone, VideoJob, VideoSettings};
 use algfrac::video::project::{self, Format, VideoProject, LAST_SESSION};
 use eframe::egui::{self, vec2, Color32, Rect, Sense, Stroke, TextureHandle, TextureOptions};
 use std::path::PathBuf;
@@ -115,6 +115,8 @@ enum Msg {
 pub struct RenderJob {
     name: String,
     frames: usize,
+    /// the frame it started from (after the frames done before it was paused)
+    first: usize,
     est_done: Vec<f64>,
     rows_total: Arc<AtomicUsize>,
     done: usize,
@@ -170,6 +172,10 @@ pub struct VideoWindow {
     frame_tex: Option<TextureHandle>,
     /// the last render's message and output
     finished: Option<(String, Option<PathBuf>)>,
+    /// the paused video of the project of this name, if it has one
+    paused: Option<(String, Option<VideoJob>)>,
+    /// Start again was pressed while there's a paused video
+    confirm_restart: bool,
     status: Option<(String, Instant)>,
     ramp: Option<(Style, TextureHandle)>,
     /// unsaved changes to ask about, and what to do after
@@ -209,6 +215,8 @@ impl VideoWindow {
             render: None,
             frame_tex: None,
             finished: None,
+            paused: None,
+            confirm_restart: false,
             status: None,
             ramp: None,
             pending: None,
@@ -246,6 +254,11 @@ impl VideoWindow {
 
     pub fn rendering(&self) -> bool {
         self.render.is_some()
+    }
+
+    /// The project's paused video, if it has one.
+    fn paused_job(&self) -> Option<&VideoJob> {
+        self.paused.as_ref().filter(|p| p.0 == self.project.name)?.1.as_ref()
     }
 
     fn say(&mut self, s: impl Into<String>) {
@@ -331,6 +344,9 @@ impl VideoWindow {
     /// and preview wait until it's open again).
     pub fn poll(&mut self, ctx: &egui::Context, shared: &mut Shared, open: bool) {
         self.poll_render(ctx);
+        if self.paused.as_ref().is_none_or(|p| p.0 != self.project.name) {
+            self.paused = Some((self.project.name.clone(), VideoJob::paused(&self.project.name).and_then(Result::ok)));
+        }
         if self.render.is_some() || !open {
             return;
         }
@@ -622,7 +638,7 @@ impl VideoWindow {
             Some(l) if same_path && c.needs_levels() => l.clone(),
             _ => Vec::new(),
         };
-        let rgb = pv.frames.finish(pv.k, &pv.renders, &c.style, &|st| c.scale(&pv.frames.path, &levels, pv.k, st));
+        let rgb = c.frame(&pv.frames, pv.k, &pv.renders, &levels);
         set_texture(ctx, &mut self.preview_tex, "preview", pv.frames.width(), pv.frames.height, &rgb, TextureOptions::LINEAR);
         self.preview_drawn = Some((self.preview_gen, c));
     }
@@ -655,7 +671,8 @@ impl VideoWindow {
 
     // ---- rendering the video ----
 
-    fn start_render(&mut self, shared: &mut Shared) {
+    /// Starts the video from the first frame, or carries on with the paused one.
+    fn start_render(&mut self, shared: &mut Shared, resume: bool) {
         if let Some(job) = self.preview_job.take() {
             job.cancel.store(true, Ordering::Relaxed);
         }
@@ -663,12 +680,19 @@ impl VideoWindow {
             job.cancel.store(true, Ordering::Relaxed);
             self.strip.target.clear(); // finish the thumbnails afterwards
         }
-        if self.unsaved() && !self.project.name.trim().is_empty() && self.project.name != LAST_SESSION {
-            let name = self.project.name.clone();
-            self.save(&name);
-        }
-        let p = &self.project;
-        let (mp4, pngs) = output_paths(&p.output.folder, &p.output.file, p.output.format);
+        let paused = if resume { self.paused_job().cloned() } else { None };
+        let job = match paused {
+            Some(job) => job,
+            None => {
+                if self.unsaved() && !self.project.name.trim().is_empty() && self.project.name != LAST_SESSION {
+                    let name = self.project.name.clone();
+                    self.save(&name);
+                }
+                VideoJob::new(&self.project, &self.project.output.folder)
+            }
+        };
+        self.paused = None;
+        let p = &job.project;
         let mut v = VideoSettings::of(p, shared.threads);
         // the waypoints' levels already measured by the frame preview (the rest are
         // measured when the render starts)
@@ -682,7 +706,7 @@ impl VideoWindow {
                 })
                 .collect();
         }
-        let (count, start_max) = (v.frames.count(), v.frames.max(0));
+        let (count, first, start_max) = (v.frames.count(), job.done, v.frames.max(job.done));
         let rows_total = Arc::new(AtomicUsize::new(v.frames.height * v.frames.aa));
         let cancel = Arc::new(AtomicBool::new(false));
         let rows = Arc::new(AtomicUsize::new(0));
@@ -698,12 +722,13 @@ impl VideoWindow {
             let _ = tx2.send(Msg::Estimate(est_done.collect()));
             repaint_now(&ctx2);
         });
-        let out = mp4.clone().or(pngs.clone()).unwrap_or_default();
+        let out = job.mp4.clone().or(job.pngs.clone()).unwrap_or_default();
+        let name = p.name.clone();
         let (c2, r2, t2, ctx) = (cancel.clone(), rows.clone(), rows_total.clone(), shared.ctx.clone());
         std::thread::spawn(move || {
             let tx3 = tx.clone();
             let ctx3 = ctx.clone();
-            let res = make_video(&v, mp4.as_deref(), pngs.as_deref(), &c2, (&r2, &t2), &mut |f| {
+            let res = job.make(&v, &c2, (&r2, &t2), &mut |f| {
                 let _ = tx3.send(Msg::Frame(f));
                 repaint_now(&ctx3);
             });
@@ -711,11 +736,12 @@ impl VideoWindow {
             repaint_now(&ctx);
         });
         self.render = Some(RenderJob {
-            name: p.name.clone(),
+            name,
             frames: count,
+            first,
             est_done: Vec::new(),
             rows_total,
-            done: 0,
+            done: first,
             max: start_max,
             last_secs: 0.0,
             bytes: 0,
@@ -726,14 +752,15 @@ impl VideoWindow {
             out,
         });
         self.finished = None;
-        self.say(format!("Rendering {count} frames..."));
+        self.say(if first > 0 { format!("Carrying on from frame {} of {count}...", first + 1) } else { format!("Rendering {count} frames...") });
     }
 
-    /// Stops the render after the current frame (it saves what's done).
+    /// Pauses the render after the current frame: it saves what's done, and Resume
+    /// carries on with it.
     pub fn stop_render(&mut self) {
         if let Some(job) = &self.render {
             job.cancel.store(true, Ordering::Relaxed);
-            self.say("Stopping after the current frame...");
+            self.say("Pausing after the current frame...");
         }
     }
 
@@ -757,10 +784,11 @@ impl VideoWindow {
                 Ok(s) => s,
                 Err(e) => format!("Error: {e}"),
             };
-            let ok = msg.starts_with("Done") || msg.starts_with("Stopped after");
+            let ok = msg.starts_with("Done") || msg.starts_with("Paused after");
             self.finished = Some((msg.clone(), ok.then_some(out)));
             self.say(msg);
             self.render = None;
+            self.paused = None; // read it again
         } else {
             repaint_after(ctx, 200);
         }
@@ -814,7 +842,7 @@ impl VideoWindow {
                 Tab::Output => self.output_tab(ui),
             });
         });
-        self.questions(ctx);
+        self.questions(ctx, shared);
     }
 
     fn project_bar(&mut self, ui: &mut egui::Ui, shared: &mut Shared, explorer: &Explorer) {
@@ -910,7 +938,13 @@ impl VideoWindow {
         let summary = format!("{n} frames · {} at {} fps · {} x {}", duration_text(n as f64 / o.fps as f64), o.fps, f.width(), f.height);
         let levels = self.project.colouring.needs_levels();
         let time = self.estimate.as_ref().filter(|(ef, el, _)| ef == f && *el == levels).map(|e| e.2);
-        let (mut start, mut stop) = (false, false);
+        let (mut start, mut stop, mut resume, mut restart) = (false, false, false, false);
+        // a paused video: its progress, and whether the project has changed since
+        let paused = self.paused_job().map(|j| {
+            let (a, b) = (&j.project, &self.project);
+            let same = a.frames == b.frames && a.colouring == b.colouring && (a.output.format, a.output.fps, a.output.quality) == (b.output.format, b.output.fps, b.output.quality);
+            (j.progress(), same)
+        });
         ui.horizontal(|ui| {
             ui.label(summary);
             ui.weak(format!("· ~{mb:.0} MB")).on_hover_text("Star fields need a lot of data to stay sharp; the real size depends on how busy the frames are");
@@ -920,7 +954,27 @@ impl VideoWindow {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.render.is_some() {
-                    stop = ui.button("⏹ Stop").on_hover_text("Stop after the current frame; the frames so far are kept as a shorter video").clicked();
+                    stop = ui
+                        .button("⏸ Pause")
+                        .on_hover_text("Stop after the current frame and save the video so far. ⏵ Resume carries on with it,
+now or another day (the program can be closed in between).")
+                        .clicked();
+                } else if let Some(((done, n), same)) = paused {
+                    let go = egui::Button::new(egui::RichText::new("⏵ Resume").strong().size(16.0)).min_size(vec2(150.0, 30.0));
+                    resume = ui
+                        .add(go)
+                        .on_hover_text(format!("Carry on with the paused video from frame {} of {n}, into the same file,
+with the settings it was started with", done + 1))
+                        .clicked();
+                    restart = ui.button("⏺ Start again").on_hover_text("Render the video from the first frame, into a new file").clicked();
+                    ui.label(format!("Paused: {done} of {n} frames done"));
+                    if !same {
+                        ui.colored_label(ORANGE, "⚠ changed since").on_hover_text(
+                            "The project has been changed since this video was paused. Resume carries on with the
+
+                             settings it was started with, so that the whole video matches; Start again uses the new ones.",
+                        );
+                    }
                 } else {
                     let go = egui::Button::new(egui::RichText::new("⏺ Render now").strong().size(16.0)).min_size(vec2(150.0, 30.0));
                     start = ui.add(go).on_hover_text("Render every frame and write the video (the project is saved first)").clicked();
@@ -928,7 +982,13 @@ impl VideoWindow {
             });
         });
         if start {
-            self.start_render(shared);
+            self.start_render(shared, false);
+        }
+        if resume {
+            self.start_render(shared, true);
+        }
+        if restart {
+            self.confirm_restart = true;
         }
         if stop {
             self.stop_render();
@@ -1210,6 +1270,11 @@ impl VideoWindow {
         });
         ui.add_space(4.0);
         colour_controls(ui, &mut self.project.colouring.style, &mut self.ramp, "video");
+        ui.add_space(4.0);
+        ui.checkbox(&mut self.project.colouring.number_line, "📏 Number line").on_hover_text(
+            "A number line along the real axis on every frame, with ticks that follow the zoom.\n\
+             When the axis is out of view, it runs dashed along the nearest edge.",
+        );
         ui.add_space(8.0);
         ui.strong("Colour scale for the whole video");
         let c = &mut self.project.colouring;
@@ -1416,6 +1481,11 @@ impl VideoWindow {
         for p in mp4.iter().chain(pngs.iter()) {
             ui.weak(p.display().to_string());
         }
+        if let Some(job) = self.paused_job() {
+            for p in job.mp4.iter().chain(job.pngs.iter()) {
+                ui.weak(format!("⏵ Resume carries on in {}", p.display()));
+            }
+        }
         if let Some((msg, Some(out))) = &self.finished {
             ui.add_space(8.0);
             ui.label(msg);
@@ -1552,8 +1622,31 @@ impl VideoWindow {
         }
     }
 
-    /// Unsaved changes, and the name for Save as.
-    fn questions(&mut self, ctx: &egui::Context) {
+    /// Unsaved changes, the name for Save as, and starting a paused video again.
+    fn questions(&mut self, ctx: &egui::Context, shared: &mut Shared) {
+        if self.confirm_restart {
+            let mut answer = None;
+            egui::Window::new("Start again?").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+                if let Some((done, n)) = self.paused_job().map(VideoJob::progress) {
+                    ui.label(format!("The paused video ({done} of {n} frames) is kept as a shorter video,
+but it can't be resumed after this."));
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Start again").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if let Some(go) = answer {
+                self.confirm_restart = false;
+                if go {
+                    self.start_render(shared, false);
+                }
+            }
+        }
         if self.pending.is_some() {
             let mut answer = None;
             egui::Window::new("Unsaved changes").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
@@ -1653,9 +1746,10 @@ fn mark_waypoints(painter: &egui::Painter, rect: Rect, region: &algfrac::engine:
 fn time_left(job: &RenderJob) -> String {
     let el = job.started.elapsed().as_secs_f64();
     match (job.done, job.est_done.last()) {
-        (done, Some(&total)) if done > 0 && done <= job.est_done.len() => {
-            let so_far = job.est_done[done - 1].max(1e-9);
-            format!(", ~{} left", duration_text(el * (total - so_far).max(0.0) / so_far))
+        (done, Some(&total)) if done > job.first && done <= job.est_done.len() => {
+            let before = job.first.checked_sub(1).map_or(0.0, |k| job.est_done[k]);
+            let so_far = (job.est_done[done - 1] - before).max(1e-9);
+            format!(", ~{} left", duration_text(el * (total - job.est_done[done - 1]).max(0.0) / so_far))
         }
         _ => String::new(),
     }

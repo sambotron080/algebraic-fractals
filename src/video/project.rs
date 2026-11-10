@@ -310,7 +310,7 @@ impl VideoProject {
         ] {
             kv(k, v.to_string());
         }
-        for (k, v) in [("invert", s.invert), ("shade", s.shade), ("log_poly", s.log_poly), ("smooth", s.smooth), ("steady", self.colouring.steady)] {
+        for (k, v) in [("invert", s.invert), ("shade", s.shade), ("log_poly", s.log_poly), ("smooth", s.smooth), ("steady", self.colouring.steady), ("number_line", self.colouring.number_line)] {
             kv(k, (v as u8).to_string());
         }
         kv(
@@ -419,7 +419,7 @@ impl VideoProject {
             names: wps.iter().map(|w| w.0.clone()).collect(),
             auto: wps.iter().map(|w| w.3).collect(),
             target: num("target").map_or(4.0, |t| t.clamp(0.01, 1000.0)),
-            colouring: Colouring { style, steady: flag("steady", false), lh },
+            colouring: Colouring { style, steady: flag("steady", false), lh, number_line: flag("number_line", false) },
             output: Output {
                 format: get("format").and_then(|t| Format::ALL.into_iter().find(|f| f.short() == t)).unwrap_or(Format::Mp4),
                 fps: num("fps").map(|f| f as u32).filter(|f| FPS.contains(f)).unwrap_or(30),
@@ -565,6 +565,7 @@ mod tests {
             style: Style { by: ColourBy::Height, cmap: Colormap::Magma, n: 2.5, gamma: 1.7, low: 20.0, high: 99.0, log_poly: true, smooth: false, ..Style::default() },
             steady: true,
             lh: LhScale::Fixed(3.0, 1840.0),
+            number_line: true,
         };
         p.output = Output { format: Format::Both, fps: 60, quality: 3, folder: "D:\\out".into(), file: "deep dive".into() };
         p

@@ -438,6 +438,10 @@ pub struct Mp4Out {
     owed: u32,
     pub frames: usize,
     pub bytes: usize,
+    /// carrying on an old file: the parameter sets the new frames must have
+    check: Option<(Vec<u8>, Vec<u8>)>,
+    /// carrying on an old file: the file that the new one replaces at `finish`
+    replace: Option<std::path::PathBuf>,
 }
 
 const TIMESCALE: u32 = 90_000;
@@ -485,7 +489,69 @@ impl Mp4Out {
             owed: 0,
             frames: 0,
             bytes: 0,
+            check: None,
+            replace: None,
         })
+    }
+
+    /// Carries on the finished .mp4 file at `path`: its frames are copied into a new file
+    /// beside it (.mp4.part), the frames pushed after them are encoded onto the end, and
+    /// `finish` puts the new file in the old one's place. Until then the old file is left
+    /// as it was. The file holds one set of parameter sets (SPS/PPS) for every frame, so
+    /// the new encoder's have to match the old ones (they do with the same settings).
+    pub fn resume(path: &Path, width: usize, height: usize, fps: u32, qp: u8) -> Result<Mp4Out, String> {
+        let err = |e: mp4::Error| format!("could not read {}: {e}", path.display());
+        let file = File::open(path).map_err(|e| format!("could not open {}: {e}", path.display()))?;
+        let size = file.metadata().map_err(|e| e.to_string())?.len();
+        let mut r = mp4::Mp4Reader::read_header(std::io::BufReader::new(file), size).map_err(err)?;
+        let Some((&id, track)) = r.tracks().iter().next() else {
+            return Err(format!("{} has no video in it", path.display()));
+        };
+        if (track.width() as usize, track.height() as usize, track.timescale()) != (width, height, TIMESCALE) {
+            return Err(format!("{} isn't {width} x {height} video from this program", path.display()));
+        }
+        let ps = (track.sequence_parameter_set().map_err(err)?.to_vec(), track.picture_parameter_set().map_err(err)?.to_vec());
+        let count = track.sample_count();
+        let mut out = Mp4Out::new(&path.with_extension("mp4.part"), width, height, fps, qp)?;
+        out.create(ps.0.clone(), ps.1.clone())?;
+        for k in 1..=count {
+            let s = r.read_sample(id, k).map_err(err)?.ok_or_else(|| format!("{} is missing frame {k}", path.display()))?;
+            out.bytes += s.bytes.len();
+            out.time = s.start_time + s.duration as u64;
+            out.file.as_mut().unwrap().write_sample(1, &s).map_err(|e| format!("writing the video failed: {e}"))?;
+        }
+        out.frames = count as usize;
+        out.check = Some(ps);
+        out.replace = Some(path.to_path_buf());
+        Ok(out)
+    }
+
+    /// Creates the file, with the stream's parameter sets in its header.
+    fn create(&mut self, sps: Vec<u8>, pps: Vec<u8>) -> Result<(), String> {
+        let file = File::create(&self.path).map_err(|e| format!("could not create {}: {e}", self.path.display()))?;
+        let brand = |s: &str| s.parse().unwrap();
+        let config = mp4::Mp4Config {
+            major_brand: brand("isom"),
+            minor_version: 512,
+            compatible_brands: vec![brand("isom"), brand("iso2"), brand("avc1"), brand("mp41")],
+            timescale: 1000,
+        };
+        let mut writer = mp4::Mp4Writer::write_start(BufWriter::new(file), &config).map_err(|e| e.to_string())?;
+        writer
+            .add_track(&mp4::TrackConfig {
+                track_type: mp4::TrackType::Video,
+                timescale: TIMESCALE,
+                language: "und".into(),
+                media_conf: mp4::MediaConfig::AvcConfig(mp4::AvcConfig {
+                    width: self.width as u16,
+                    height: self.height as u16,
+                    seq_param_set: sps,
+                    pic_param_set: pps,
+                }),
+            })
+            .map_err(|e| e.to_string())?;
+        self.file = Some(writer);
+        Ok(())
     }
 
     /// Encodes one frame of packed RGB (width * height * 3 bytes).
@@ -519,29 +585,11 @@ impl Mp4Out {
             let (Some(sps), Some(pps)) = (sps, pps) else {
                 return Err("the encoder's first frame had no SPS/PPS".into());
             };
-            let file = File::create(&self.path).map_err(|e| format!("could not create {}: {e}", self.path.display()))?;
-            let brand = |s: &str| s.parse().unwrap();
-            let config = mp4::Mp4Config {
-                major_brand: brand("isom"),
-                minor_version: 512,
-                compatible_brands: vec![brand("isom"), brand("iso2"), brand("avc1"), brand("mp41")],
-                timescale: 1000,
-            };
-            let mut writer = mp4::Mp4Writer::write_start(BufWriter::new(file), &config).map_err(|e| e.to_string())?;
-            writer
-                .add_track(&mp4::TrackConfig {
-                    track_type: mp4::TrackType::Video,
-                    timescale: TIMESCALE,
-                    language: "und".into(),
-                    media_conf: mp4::MediaConfig::AvcConfig(mp4::AvcConfig {
-                        width: w as u16,
-                        height: h as u16,
-                        seq_param_set: sps,
-                        pic_param_set: pps,
-                    }),
-                })
-                .map_err(|e| e.to_string())?;
-            self.file = Some(writer);
+            self.create(sps, pps)?;
+        } else if let Some((s, p)) = self.check.take() {
+            if (sps, pps) != (Some(s), Some(p)) {
+                return Err("the video encoder's settings have changed, so it can't carry on this video".into());
+            }
         }
 
         if sample.is_empty() {
@@ -563,6 +611,9 @@ impl Mp4Out {
             w.write_end().map_err(|e| format!("finishing the video failed: {e}"))?;
             use std::io::Write;
             w.into_writer().flush().map_err(|e| e.to_string())?;
+        }
+        if let Some(old) = &self.replace {
+            std::fs::rename(&self.path, old).map_err(|e| format!("could not replace {}: {e}", old.display()))?;
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 # Algebraic Fractals
 
-Pictures of the complex plane that show where the **algebraic numbers** are: the roots of polynomials with whole-number coefficients, like `x² − 2` (root √2) or `3x³ + x − 1`. With the degree and coefficient sizes limited, these roots form star fields, lace, flowers and spirals that keep going at every zoom level. **Algebraic Fractals** lets you explore them, save the views you like, and turn them into smooth zoom videos.
+Pictures of the complex plane that show where the **algebraic numbers** are: the roots of polynomials with whole-number coefficients, like `x² − 2` (root √2) or `3x³ + x − 1`. With the degree and coefficient sizes limited, these roots form star fields, lace, flowers and spirals that keep reappearing as you zoom in. **Algebraic Fractals** lets you explore them, save the views you like, and turn them into smooth zoom videos.
 
 <p>
   <img src="docs/images/flower-order3.png" width="32%">
@@ -32,7 +32,8 @@ The [user guide](docs/USER-GUIDE.md) explains everything.
 - recolour instantly, with 23 colormaps and image-editing sliders;
 - predict how dense the stars will be before rendering, and choose the order or max coefficient to keep that density steady as you zoom;
 - hover to see the polynomial behind every point;
-- save PNGs, and save locations in groups.
+- an optional number line along the real axis, whose labels follow the zoom (in saved images and videos too);
+- save PNGs, and save locations in groups (e and π come ready-saved).
 
 **The video window:**
 - a path from a start, through any number of waypoints, to a finish: taken from a group of locations, or added from the explorer's view;
@@ -41,7 +42,8 @@ The [user guide](docs/USER-GUIDE.md) explains everything.
 - one colouring for the whole video, with the brightness and the length/height colour scale held steady if you like;
 - fast: each part of the plane is rendered once and shared by the frames that show it (about 6 times faster for zooms), and deep views share one search per tile of pixels, so a 720p frame 10⁻⁷ wide with coefficients up to 3000 takes a fraction of a second;
 - MP4 (H.264) and/or PNG frames, up to 4K, with optional anti-aliasing;
-- projects that save every setting, to render now, later, or from the command line.
+- projects that save every setting, to render now, later, or from the command line;
+- pause a long render and resume it later, even after closing the program.
 
 **The command line**, `algfrac`, renders single images (and their raw data) for scripts or very large renders, and renders saved video projects.
 
@@ -115,6 +117,19 @@ Near a root α of p, the residual is about |p′(α)| · |X − α|. So each sta
 How an image looks depends mostly on how many algebraic numbers fall in each pixel. Too few, and it's a scatter of isolated dots. Too many, and the stars merge into noise. Around 4 per 100 square pixels gives a fine, even star field.
 
 This density can be predicted before rendering. The number of allowed polynomials of each degree is easy to count. The **Kac–Rice formula** gives the expected density of roots of a random polynomial at each point of the plane. A correction, measured by solving a few thousand random allowed polynomials, accounts for how integer coefficients confine the roots. Multiplying these and integrating over the view gives the expected number of stars, usually to within about 20%. The app shows this prediction (the *root density*) and can set the order or max coefficient to hold it at a chosen value as you zoom. See [Predicting the density](docs/DEVELOPER.md#predicting-the-density-densityrs) for the details.
+
+### Are these really fractals?
+
+Not strictly, so the name is a loose one:
+- **One image runs out of detail.** It uses polynomials up to a fixed order and max coefficient: a finite list, with finitely many roots. Zoom in far enough without raising the max coefficient and you reach a single smooth glow around one root. A true fractal has new detail at every scale.
+- **The limit isn't a fractal either.** As the max coefficient grows without bound, the roots of order 2 and above fill the plane densely, so the set of all of them is just the whole plane. What the images really show is how these numbers are *spread out*: the holes, bands and flowers described above.
+
+But they behave like fractals in the ways you can see:
+- **The patterns recur at ever smaller scales.** Raise the max coefficient as you zoom in, and the same kinds of structure keep appearing: dark holes around simple numbers, with flowers around them. The explorer's automatic search raises it for you, and a video's **keep flower size** setting matches the two exactly for one flower.
+- **The approximate symmetries make shrunken copies.** The maps z → (az + b)/(cz + d) from [Symmetries](#symmetries-every-region-is-different-but-motifs-recur) can be repeated without end. Repeating them packs smaller and smaller distorted copies of the region around i into the plane, piling up towards the real axis. This is also why plots of modular forms look fractal. Two of these maps turn the plane about a fixed point:
+  - z → −1/z gives a half turn about i, so the view around i has twofold symmetry (exactly, for the star positions).
+  - z → 1/(1 − z) gives a third of a turn about (1 + i√3)/2, so the lotus flower there, the program's icon, has approximate threefold symmetry.
+- **Closely related pictures are true fractals.** Take the roots of polynomials whose coefficients are all ±1 (or all 0 or 1), of *every* degree. The closure of that set is a genuine fractal, and its zoomed-in pieces match the attractors of the maps z → qz ± 1: these are the "dragon" sets near the unit circle mentioned above. The program shows truncated versions of them at max coefficient 1 and high orders. See Baez and Odlyzko–Poonen below.
 
 ### Further reading
 

@@ -71,6 +71,7 @@ The keys work when no text box is being typed in.
 | **⏴ Back** | the previous view (the last 30 are remembered), rendered again |
 | **🏠 Home** | back to the home view: centred on i, half-width 0.75 |
 | **🌸 Snap to flowers** | when on, a click puts the zoom box on the centre of the largest flower near where you clicked (the simplest quadratic number within the box). The status bar names its polynomial. |
+| **📏 Number line** | when on, a number line runs along the real axis, labelled at steps of 1, 2 or 5 times a power of ten that follow the zoom, so deep down the labels show more decimals. When the real axis is out of view, it runs dashed along the edge nearest it. Saved images include it. |
 | **➖ Zoom out** | zoom out by the zoom factor (at least ×2), keeping the centre |
 | **🔄 Refresh** | render the view again, e.g. after changing the resolution |
 | **View...** | the view's exact centre and half-width, which you can type into and **Go** to, or **Copy**; the zoom factor; **Show zoom box** |
@@ -177,13 +178,15 @@ A **location** is a saved view: a name, a centre and a half-width. Nothing else 
 - On a group's line: **🎬 Make video** opens the video window with the group's locations as the start, waypoints and finish. **⚙** has **Rename**, **Sort by depth** (widest first, so the video zooms in), **Reverse order** and **Delete group...**. Click the triangle to fold a group away.
 - **➕ New group** adds an empty group.
 
+**e and pi.** The group **Constants** holds e and π, centred on the real axis. They are transcendental, so however far you zoom in, no algebraic number lands exactly on them: turn on the **📏 Number line** and watch their digits appear in the labels. The group is added once; delete it if you don't want it, and it stays deleted.
+
 **Places from the old explorer.** If you used the old explorer (`algfrac-gui.exe`), its saved places appear in the group **Old places**, with their names and views. Their saved renders aren't used, and the old files are left untouched.
 
 ---
 
 ## Saving images
 
-**💾 Save image** (Ctrl+S) saves the image at its full resolution, with the current colours, as a PNG in the images folder (☰ → **Folders...**; at first `Pictures\Algebraic Fractals`). Right-click it for **Save image as...** to choose the name and folder. The file name records everything needed to find the image again:
+**💾 Save image** (Ctrl+S) saves the image at its full resolution, with the current colours (and the number line, if it's on), as a PNG in the images folder (☰ → **Folders...**; at first `Pictures\Algebraic Fractals`). Right-click it for **Save image as...** to choose the name and folder. The file name records everything needed to find the image again:
 
 ```
 alg_o4_m12_+0.50000000+0.80000000i_hw7.500e-1_1024px_pow_inferno_n3.png
@@ -272,7 +275,7 @@ The flower keeps its exact size and shape, but the stars around it get about **4
 
 ### Colour tab
 
-**One colouring for the whole video**: the same controls as the main window's [Colours](#colours), with an **example frame** of the video beside them, recoloured as you change them. Its slider picks any frame (it's the same frame as the Path tab's Look at a frame). **Copy the explorer's colours** and **Use these colours in the explorer** move colours between the two windows.
+**One colouring for the whole video**: the same controls as the main window's [Colours](#colours), with an **example frame** of the video beside them, recoloured as you change them. Its slider picks any frame (it's the same frame as the Path tab's Look at a frame). **Copy the explorer's colours** and **Use these colours in the explorer** move colours between the two windows. **📏 Number line** draws the number line on every frame, as in the explorer, with labels that follow the zoom. A new video starts with it on if it's on in the explorer.
 
 **Colour scale for the whole video.** Normally each frame is scaled to its own pixels: its brightness by its own percentiles (max %, min %), and for length or height, the colormap runs from the frame's lowest value to its highest. So every frame is well exposed, but the scale moves a little from frame to frame.
 - **Steady brightness** (off by default): the brightness percentiles are measured at the waypoints and change steadily from one to the next, instead of each frame's own, so the brightness doesn't pulse as stars come in. On a ×10 zoom into a flower, it made the overall brightness about 4 times steadier. The waypoints' frames are rendered first, which adds a few frames' time.
@@ -334,9 +337,15 @@ Video sites recompress uploads, so for sharing online **very high** keeps the mo
 The bottom bar shows the number of frames, the length, the size, a rough file size and, once something has been rendered to time it by, a rough render time. **⏺ Render now** saves the project (if it has a name) and renders every frame in order. While it runs:
 - the tab area shows the latest frame, the progress, the time left and the size so far. The time left allows for later frames being slower, as the max coefficient rises;
 - the settings are locked, but the main window keeps working (both share the processor, so each is slower while the other is busy), and the video window can be closed;
-- **⏹ Stop** finishes the current frame and saves the video so far as a shorter video.
+- **⏸ Pause** finishes the current frame and saves the video so far, which plays as a shorter video.
 
-When it's done, the Output tab has **Show in folder** and **▶ Play**. Closing the program while a video renders asks whether to stop and save what's done, keep rendering, or quit without saving.
+**Carrying on later.** After a pause, the bottom bar shows how far the video got, with **⏵ Resume** and **Start again**:
+- **⏵ Resume** carries on from the next frame, into the same file, so you end up with one video. It works now or another day, even after closing the program. It uses the settings the video was started with, so the whole video matches even if you've changed the project since; **⚠ changed since** shows when you have.
+- **Start again** renders from the first frame into a new file. The paused video stays as a shorter video, but it can't be resumed after that, so it asks first.
+
+The Output tab shows which file Resume carries on in. Don't move or rename it, or Resume can't find it.
+
+When it's done, the Output tab has **Show in folder** and **▶ Play**. Closing the program while a video renders asks whether to pause and save what's done (to resume later), keep rendering, or quit without saving.
 
 **Render times.** Every frame rendered separately takes about as long as the same image in the explorer (times the smoothing, and up to 2 with fading). Reuse is several times faster. Measured on a 12-core PC, order 3, auto max coefficient, root density 4, every frame separately, without fading:
 
@@ -363,7 +372,13 @@ Leaving a project with unsaved changes asks first. If the program closes with un
 algfrac.exe video "Spiral dive"
 ```
 
-It prints the progress and the time left; Ctrl+C stops after the current frame and keeps the video so far. `algfrac.exe video --list` lists the saved projects.
+It prints the progress and the time left. Ctrl+C pauses after the current frame and keeps the video so far, and
+
+```
+algfrac.exe video "Spiral dive" --resume
+```
+
+carries on with it. Paused videos are shared with the app, so a video paused on the command line can be resumed with ⏵ Resume, and the other way round. While a project has a paused video, running it again needs `--resume`, or `--restart` to start again from the first frame. `algfrac.exe video --list` lists the saved projects.
 
 ---
 
@@ -377,6 +392,7 @@ Each star is an algebraic number, and the patterns come from how these numbers r
 - **Why order 3 is special.** At order 2, every complex star has a rational real part, so they sit stiffly on vertical lines. Order 3 is the first order where they're free, but there are few enough cubics that they still gather into flowers around the quadratic numbers. At higher orders, the far greater number of polynomials blurs this into a finer, more even texture, concentrated near the unit circle.
 - **Repeating, but never identical.** Transformations like z → 1/z and z → z + 1 turn polynomials into other polynomials of the same order, but with bigger coefficients. So a motif reappears elsewhere distorted and thinner. Only flipping (top/bottom, left/right) and z → 1/z (inside/outside the unit circle) are exact symmetries.
 - **Star size.** Each star's glow is roughly proportional to 1/|p′(α)|. Polynomials that cross zero gently give large soft stars, and steep ones give pinpricks.
+- **Are they really fractals?** Not strictly. One image uses finitely many polynomials, so zoom in far enough without raising the max coefficient and the detail runs out. But raise it as you zoom, and the same kinds of pattern keep reappearing at smaller and smaller scales. The approximate symmetries above also pack shrunken copies of each region towards the real axis. So the images behave like fractals, which is what the name means.
 
 The [README](../README.md#why-the-patterns-look-the-way-they-do) explains more, with references. For a readable introduction, see John Baez's essay *The Beauty of Roots*, and the paper *Algebraic Number Starscapes* by Harriss, Stange and Trettel.
 

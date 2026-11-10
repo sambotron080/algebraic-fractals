@@ -133,8 +133,10 @@ dependencies = [
 name = "algebraic-fractals"
 version = "0.3.0"
 dependencies = [
+ "ab_glyph",
  "ctrlc",
  "eframe",
+ "epaint_default_fonts",
  "miniz_oxide 0.8.9",
  "mp4",
  "openh264",

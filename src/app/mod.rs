@@ -66,5 +66,7 @@ pub fn new_project(shared: &Shared, explorer: &Explorer, group: Option<usize>) -
         }
     };
     let s = &explorer.search;
-    VideoProject::new(&name, stops, s.order, s.coefs, explorer.target_density, explorer.style, &shared.videos_dir)
+    let mut p = VideoProject::new(&name, stops, s.order, s.coefs, explorer.target_density, explorer.style, &shared.videos_dir);
+    p.colouring.number_line = explorer.number_line;
+    p
 }

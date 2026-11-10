@@ -6,6 +6,7 @@ use super::Shared;
 use algfrac::colour::{colourise, colourise_into, ColourBy, Stats, Style};
 use algfrac::common::*;
 use algfrac::engine::{render_axes, Coefs, Plan, Region, Render};
+use algfrac::numberline;
 use algfrac::png::write_png_compressed;
 use eframe::egui::{self, pos2, vec2, Color32, ColorImage, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions};
 use std::path::PathBuf;
@@ -221,7 +222,8 @@ pub struct Explorer {
     pub loc: super::popups::LocationsUi,
 
     texture: Option<TextureHandle>,
-    drawn: Option<(usize, Style)>,
+    /// what the texture shows: (render, style, number line)
+    drawn: Option<(usize, Style, bool)>,
     pub ramp: Option<(Style, TextureHandle)>,
     hover: String,
     pub status: String,
@@ -238,6 +240,8 @@ pub struct Explorer {
     fill_changed: Option<((usize, usize), Instant)>,
     /// clicks move the zoom box onto the nearest flower
     pub snap: bool,
+    /// draw the number line along the real axis (in saved images too)
+    pub number_line: bool,
 }
 
 impl Explorer {
@@ -290,6 +294,7 @@ impl Explorer {
             fill_size: None,
             fill_changed: None,
             snap: s.flag("explore.snap").unwrap_or(false),
+            number_line: s.flag("explore.number_line").unwrap_or(false),
         }
     }
 
@@ -312,6 +317,7 @@ impl Explorer {
         s.set("explore.wide_height", self.wide_height);
         s.set("explore.shape", self.shape.key());
         s.set_flag("explore.snap", self.snap);
+        s.set_flag("explore.number_line", self.number_line);
         s.set_flag("explore.auto_order", self.auto_order);
         s.set_flag("explore.auto_max", self.auto_max);
         s.set("explore.target", self.target_density);
@@ -447,19 +453,23 @@ impl Explorer {
     /// Re-colours the texture if the render or the style changed.
     fn refresh_texture(&mut self, ctx: &egui::Context) {
         let Some(sh) = &self.shown else { return };
-        if self.drawn == Some((self.shown_gen, self.style)) {
+        if self.drawn == Some((self.shown_gen, self.style, self.number_line)) {
             return;
         }
         // straight into egui's pixel format, so there's no extra conversion pass
         let mut pixels = vec![Color32::BLACK; sh.render.width * sh.render.height];
         let scale = sh.stats.scale(&self.style);
         colourise_into(&sh.render, &sh.stats, &self.style, &scale, &mut pixels, |[r, g, b]| Color32::from_rgb(r, g, b));
-        let img = ColorImage { size: [sh.render.width, sh.render.height], pixels };
+        let (w, h) = (sh.render.width, sh.render.height);
+        if self.number_line {
+            numberline::draw_pixels(&mut pixels, w, h, &image_region(sh.view, w, h), |c| [c.r(), c.g(), c.b()], |[r, g, b]| Color32::from_rgb(r, g, b));
+        }
+        let img = ColorImage { size: [w, h], pixels };
         match &mut self.texture {
             Some(t) => t.set(img, TextureOptions::NEAREST),
             None => self.texture = Some(ctx.load_texture("fractal", img, TextureOptions::NEAREST)),
         }
-        self.drawn = Some((self.shown_gen, self.style));
+        self.drawn = Some((self.shown_gen, self.style, self.number_line));
     }
 
     /// The image's file name: every setting that decides it.
@@ -492,9 +502,13 @@ impl Explorer {
             let stem = unused_stem(&name, |s| dir.join(format!("{s}.png")).exists());
             dir.join(format!("{stem}.png"))
         });
-        let rgb = colourise(&sh.render, &sh.stats, &self.style);
+        let mut rgb = colourise(&sh.render, &sh.stats, &self.style);
+        let (w, h) = (sh.render.width, sh.render.height);
+        if self.number_line {
+            numberline::draw(&mut rgb, w, h, &image_region(sh.view, w, h));
+        }
         let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        self.status = match std::fs::create_dir_all(&dir).and_then(|_| write_png_compressed(&path, sh.render.width, sh.render.height, &rgb)) {
+        self.status = match std::fs::create_dir_all(&dir).and_then(|_| write_png_compressed(&path, w, h, &rgb)) {
             Ok(()) => format!("Saved {}", path.display()),
             Err(e) => format!("Could not save {}: {e}", path.display()),
         };
@@ -719,7 +733,7 @@ impl Explorer {
     /// Every setting back to its default (the view stays).
     fn reset(&mut self, ctx: &egui::Context, shared: &mut Shared) {
         let fresh = Explorer::new(&algfrac::settings::Settings::default());
-        (self.search, self.zoom, self.show_box, self.style) = (fresh.search, fresh.zoom, fresh.show_box, fresh.style);
+        (self.search, self.zoom, self.show_box, self.style, self.number_line) = (fresh.search, fresh.zoom, fresh.show_box, fresh.style, fresh.number_line);
         (self.auto_order, self.auto_max, self.target_density) = (fresh.auto_order, fresh.auto_max, fresh.target_density);
         self.auto_key = None;
         self.save_group = UNSORTED.into();
@@ -756,6 +770,17 @@ impl Explorer {
                 .clicked()
             {
                 self.snap = !self.snap;
+            }
+            if ui
+                .add(egui::Button::new("📏 Number line").selected(self.number_line))
+                .on_hover_text(
+                    "Show a number line along the real axis, with ticks that follow the zoom.\n\
+                     When the axis is out of view, it runs dashed along the nearest edge.\n\
+                     Saved images include it.",
+                )
+                .clicked()
+            {
+                self.number_line = !self.number_line;
             }
             ui.separator();
             if popup(ui, self.is_open(Popup::View), "View...", "The view's exact centre and half-width, and the zoom factor") {
@@ -875,7 +900,7 @@ impl Explorer {
         if let Some((name, done, n, _)) = &video.rendering {
             ui.separator();
             ui.add_enabled(false, egui::Button::new(format!("Rendering '{name}': frame {} of {n}", (done + 1).min(*n))));
-            if ui.button("Stop the render").on_hover_text("Stop after the current frame and save what's done").clicked() {
+            if ui.button("Pause the render").on_hover_text("Pause after the current frame and save what's done; Resume in the video window carries on with it").clicked() {
                 pick(ui, ToVideo::StopRender);
             }
         }

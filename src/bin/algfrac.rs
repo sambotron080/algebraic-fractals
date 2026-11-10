@@ -64,6 +64,8 @@ IMAGE:
 OUTPUT:
   --out NAME            writes NAME.png and NAME.algf (default algfrac_out)
   --nodata              skip the .algf data file (raw residuals and coefficients)
+  --numberline          draw a number line along the real axis (along the nearest
+                        edge, dashed, when the axis is out of view)
   --threads T           worker threads (default: all cores)
 
 VIDEO:
@@ -71,8 +73,12 @@ VIDEO:
                         path of a .afvideo file), exactly as Render now would
     --out FOLDER        write the video there instead of the project's folder
     --threads T         worker threads (default: all cores)
+    --resume            carry on with the project's paused video, with the settings
+                        it was started with
+    --restart           start again, forgetting the paused video (its frames stay)
   algfrac video --list  list the saved projects
-  Ctrl+C stops after the current frame and keeps the video so far.
+  Ctrl+C pauses after the current frame: the video so far is kept, and --resume
+  carries on with it.
 
 EXAMPLE:
   algfrac --order 4 --maxcoef 32 --centre 1.9,0.19 --halfwidth 0.16 --width 1024 --out spiral
@@ -82,9 +88,10 @@ EXAMPLE:
 /// `algfrac video ...`: renders a saved video project. Returns the exit code.
 fn video(args: &[String]) -> i32 {
     use algfrac::video::frames::duration_text;
-    use algfrac::video::make::{make_video, output_paths, VideoSettings};
+    use algfrac::video::make::{VideoJob, VideoSettings};
     use algfrac::video::project;
     let (mut name, mut out, mut threads) = (None, None, thread::available_parallelism().map_or(4, |n| n.get()));
+    let (mut resume, mut restart) = (false, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -95,6 +102,8 @@ fn video(args: &[String]) -> i32 {
                 return 0;
             }
             "--out" => out = it.next().cloned(),
+            "--resume" => resume = true,
+            "--restart" => restart = true,
             "--threads" => match it.next().map(|t| num::<usize>(t)) {
                 Some(Ok(t)) if t > 0 => threads = t,
                 _ => {
@@ -124,44 +133,73 @@ fn video(args: &[String]) -> i32 {
             return 1;
         }
     };
-    // the max coefficients, as the app would choose them
-    for (i, note) in p.refresh_auto(&mut algfrac::density::Predictor::new()).iter().enumerate() {
-        if !note.is_empty() {
-            eprintln!("waypoint {}: auto: {note}", i + 1);
+    let job = match (VideoJob::paused(&p.name), resume) {
+        (Some(Err(e)), true) => {
+            eprintln!("error: {e}");
+            return 1;
         }
-    }
-    let folder = out.unwrap_or_else(|| p.output.folder.clone());
-    let (mp4, pngs) = output_paths(&folder, &p.output.file, p.output.format);
-    let v = VideoSettings::of(&p, threads);
+        (None, true) => {
+            eprintln!("error: '{}' has no paused video to carry on with", p.name);
+            return 1;
+        }
+        (Some(Ok(_)), true) if out.is_some() => {
+            eprintln!("error: a paused video carries on where it is, so --out can't be used with --resume");
+            return 2;
+        }
+        (Some(Ok(job)), true) => job,
+        (Some(Ok(job)), false) if !restart => {
+            let (done, n) = job.progress();
+            eprintln!("error: '{}' has a paused video ({done} of {n} frames done): add --resume to carry on with it, or --restart to start again", p.name);
+            return 2;
+        }
+        _ => {
+            // the max coefficients, as the app would choose them
+            for (i, note) in p.refresh_auto(&mut algfrac::density::Predictor::new()).iter().enumerate() {
+                if !note.is_empty() {
+                    eprintln!("waypoint {}: auto: {note}", i + 1);
+                }
+            }
+            let folder = out.unwrap_or_else(|| p.output.folder.clone());
+            VideoJob::new(&p, &folder)
+        }
+    };
+    let v = VideoSettings::of(&job.project, threads);
     let f = &v.frames;
     let n = f.count();
     println!("{}: {n} frames of {} x {}, {} at {} fps, max coefficient {:?}", p.name, f.width(), f.height, duration_text(n as f64 / v.fps as f64), v.fps, f.maxes);
+    if job.done > 0 {
+        println!("carrying on from frame {}, with the settings it was started with", job.done + 1);
+    }
     // each frame's share of the work, to scale the time so far into the time left
     let est: Vec<f64> = f.frame_secs(1e-9, v.colouring.needs_levels()).into_iter().scan(0.0, |t, s| {
         *t += s;
         Some(*t)
     }).collect();
+    let before = job.done.checked_sub(1).and_then(|k| est.get(k)).copied().unwrap_or(0.0);
     let cancel: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
     let _ = ctrlc::set_handler(move || {
         if cancel.swap(true, Ordering::Relaxed) {
             process::exit(130); // a second Ctrl+C stops at once
         }
-        eprintln!("\nstopping after the current frame (Ctrl+C again to quit at once)...");
+        eprintln!("\npausing after the current frame (Ctrl+C again to quit at once)...");
     });
     let (started, mut last) = (Instant::now(), Instant::now());
     let rows = (&AtomicUsize::new(0), &AtomicUsize::new(0));
-    let res = make_video(&v, mp4.as_deref(), pngs.as_deref(), cancel, rows, &mut |fr| {
+    let res = job.make(&v, cancel, rows, &mut |fr| {
         if last.elapsed() >= Duration::from_secs(2) || fr.k + 1 == n {
             last = Instant::now();
             let el = started.elapsed().as_secs_f64();
-            let so_far = est.get(fr.k).copied().unwrap_or(1.0).max(1e-12);
-            let left = el * (est.last().copied().unwrap_or(0.0) - so_far).max(0.0) / so_far;
+            let so_far = (est.get(fr.k).copied().unwrap_or(1.0) - before).max(1e-12);
+            let left = el * (est.last().copied().unwrap_or(0.0) - est.get(fr.k).copied().unwrap_or(0.0)).max(0.0) / so_far;
             println!("  frame {} of {n}, {:.0} MB so far, ~{} left", fr.k + 1, fr.bytes as f64 / 1e6, duration_text(left));
         }
     });
     match res {
         Ok(msg) => {
             println!("{msg}");
+            if msg.starts_with("Paused") && VideoJob::paused(&p.name).is_some() {
+                println!("carry on with: algfrac video \"{}\" --resume", p.name);
+            }
             0
         }
         Err(e) => {
@@ -179,6 +217,7 @@ struct Config {
     out: String,
     legacy: bool,
     data: bool,
+    number_line: bool,
     style: Style,
 }
 
@@ -205,6 +244,7 @@ fn parse_args() -> Result<Config, String> {
         out: "algfrac_out".to_string(),
         legacy: false,
         data: true,
+        number_line: false,
         style: Style { by: ColourBy::Log, ..Style::default() },
     };
     let mut centre = None;
@@ -219,6 +259,7 @@ fn parse_args() -> Result<Config, String> {
             "legacy" => Some(cfg.legacy = true),
             "nopng" => Some(()), // accepted for compatibility; the PNG is the point now
             "nodata" => Some(cfg.data = false),
+            "numberline" => Some(cfg.number_line = true),
             "invert" => Some(cfg.style.invert = true),
             "noshade" => Some(cfg.style.shade = false),
             "logpoly" => Some(cfg.style.log_poly = true),
@@ -388,7 +429,10 @@ fn main() {
     let el = t0.elapsed().as_secs_f64();
     eprintln!("  done in {:.2}s ({:.0} px/s)", el, (w * h) as f64 / el);
     let png_path = format!("{}.png", cfg.out);
-    let rgb = colourise(&r, &Stats::new(&r), &cfg.style);
+    let mut rgb = colourise(&r, &Stats::new(&r), &cfg.style);
+    if cfg.number_line {
+        algfrac::numberline::draw(&mut rgb, r.width, r.height, &cfg.region);
+    }
     if let Err(e) = write_png(&png_path, r.width, r.height, &rgb) {
         eprintln!("error writing {png_path}: {e}");
         process::exit(1);

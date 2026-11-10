@@ -24,6 +24,8 @@ miniz_oxide = "0.8.9"  # deflate, for compressed PNGs
 eframe = "0.31.1"      # the window (egui)
 rfd = "0.15"           # native folder and file dialogs
 ctrlc = "3.4"          # Ctrl+C in `algfrac video`: stop after the current frame
+ab_glyph = "0.2.32"    # the number line's labels (egui uses it too)
+epaint_default_fonts = "0.31.1"  # their font, Hack (egui's own copy)
 
 [build-dependencies]
 winresource = "0.1"    # the .exe's icon (build.rs)

@@ -6,7 +6,7 @@
 
 mod app;
 
-use algfrac::common::{default_images_dir, default_videos_dir, load_groups, UNSORTED};
+use algfrac::common::{add_constants, default_images_dir, default_videos_dir, load_groups, store_groups, UNSORTED};
 use algfrac::density::Predictor;
 use algfrac::settings::Settings;
 use algfrac::video::project;
@@ -35,9 +35,15 @@ fn video_id() -> egui::ViewportId {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> App {
         let settings = Settings::load();
+        let mut groups = load_groups();
+        // e and π, once (so that deleting them is for good)
+        if !settings.flag("constants_added").unwrap_or(false) {
+            add_constants(&mut groups);
+            let _ = store_groups(&groups);
+        }
         let shared = Shared {
             ctx: cc.egui_ctx.clone(),
-            groups: load_groups(),
+            groups,
             predictor: Predictor::new(),
             threads: std::thread::available_parallelism().map_or(4, |n| n.get()),
             images_dir: settings.str("images_dir").map_or_else(default_images_dir, str::to_string),
@@ -118,6 +124,7 @@ impl App {
         s.set("images_dir", &self.shared.images_dir);
         s.set("videos_dir", &self.shared.videos_dir);
         s.set("last_group", &self.explorer.save_group);
+        s.set_flag("constants_added", true);
         if let Some(v) = &mut self.video {
             if let Some(name) = v.keep_last_session() {
                 s.set("video.project", name);
@@ -133,9 +140,9 @@ impl App {
     fn quit_question(&mut self, ctx: &egui::Context) {
         let mut answer = None;
         egui::Window::new("A video is rendering").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            ui.label("Stop it and save what's done, or keep rendering?");
+            ui.label("Pause it and save what's done (Resume in the video window carries on with it), or keep rendering?");
             ui.horizontal(|ui| {
-                for (a, text) in [(0, "Stop and save"), (1, "Keep rendering"), (2, "Quit without saving")] {
+                for (a, text) in [(0, "Pause and save"), (1, "Keep rendering"), (2, "Quit without saving")] {
                     if ui.button(text).clicked() {
                         answer = Some(a);
                     }

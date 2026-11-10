@@ -1,11 +1,12 @@
 //! Rendering a whole video: every frame searched, coloured and written to an .mp4 file,
 //! a folder of PNG frames, or both. The app and the command line both use `make_video`,
-//! which reports each frame through a callback.
+//! which reports each frame through a callback, through `VideoJob`, which remembers a
+//! paused video so that it can be carried on later.
 
 use super::frames::{duration_text, Colouring, Frames, WaypointLevels, QUALITY};
-use super::project::{Format, VideoProject};
+use super::project::{projects_dir, Format, VideoProject};
 use super::{reuse, Mp4Out};
-use crate::common::unused_stem;
+use crate::common::{file_safe, unused_stem};
 use crate::engine::{render_axes, Plan, Render};
 use crate::png::write_png_compressed;
 use std::collections::HashMap;
@@ -62,23 +63,110 @@ pub fn output_paths(folder: &str, file: &str, format: Format) -> (Option<PathBuf
     (format.mp4().then(|| dir.join(format!("{stem}.mp4"))), format.png().then(|| dir.join(format!("{stem}_frames"))))
 }
 
+/// A paused video's file: `projects/<name>.afpaused` in the settings folder.
+pub const PAUSED_EXTENSION: &str = "afpaused";
+
+/// A video to make: the project, where it goes, and how many frames are done (0 for a
+/// new video). A video paused part way is kept in the project's .afpaused file until it
+/// is finished or started again, and carries on with the settings it was started with,
+/// whatever has happened to the project since.
+#[derive(Clone, PartialEq, Debug)]
+pub struct VideoJob {
+    pub project: VideoProject,
+    pub done: usize,
+    pub mp4: Option<PathBuf>,
+    pub pngs: Option<PathBuf>,
+}
+
+impl VideoJob {
+    /// A new video of `p`, into new files in `folder`.
+    pub fn new(p: &VideoProject, folder: &str) -> VideoJob {
+        let (mp4, pngs) = output_paths(folder, &p.output.file, p.output.format);
+        VideoJob { project: p.clone(), done: 0, mp4, pngs }
+    }
+
+    pub fn paused_file(name: &str) -> PathBuf {
+        projects_dir().join(format!("{}.{PAUSED_EXTENSION}", file_safe(name)))
+    }
+
+    /// The paused video of the project called `name`, if there is one.
+    pub fn paused(name: &str) -> Option<Result<VideoJob, String>> {
+        let text = std::fs::read_to_string(VideoJob::paused_file(name)).ok()?;
+        Some(VideoJob::from_text(&text))
+    }
+
+    /// Forgets the paused video of the project called `name` (its frames stay).
+    pub fn forget_paused(name: &str) {
+        let _ = std::fs::remove_file(VideoJob::paused_file(name));
+    }
+
+    /// The project file's lines, with `done`, `mp4` and `pngs` lines added.
+    fn to_text(&self) -> String {
+        let path = |p: &Option<PathBuf>| p.as_ref().map_or(String::new(), |p| p.display().to_string());
+        format!("{}done\t{}\nmp4\t{}\npngs\t{}\n", self.project.to_text(), self.done, path(&self.mp4), path(&self.pngs))
+    }
+
+    fn from_text(text: &str) -> Result<VideoJob, String> {
+        let project = VideoProject::from_text(text, "")?;
+        let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('\t'));
+        let path = |k: &str| get(k).filter(|p| !p.trim().is_empty()).map(PathBuf::from);
+        let done = get("done").and_then(|d| d.trim().parse().ok()).ok_or("the paused video's file is damaged")?;
+        Ok(VideoJob { project, done, mp4: path("mp4"), pngs: path("pngs") })
+    }
+
+    /// The frames to make, out of how many.
+    pub fn progress(&self) -> (usize, usize) {
+        (self.done, self.project.frames.count())
+    }
+
+    /// Makes the video with `v` (the project's settings, from `VideoSettings::of`), from
+    /// frame `done` on (see `make_video`). Starting a new video forgets the project's
+    /// paused one. Stopping part way keeps this one as the paused video; finishing it
+    /// forgets it.
+    pub fn make(
+        &self,
+        v: &VideoSettings,
+        cancel: &AtomicBool,
+        rows: (&AtomicUsize, &AtomicUsize),
+        on_frame: &mut dyn FnMut(FrameDone),
+    ) -> Result<String, String> {
+        let name = &self.project.name;
+        if self.done == 0 {
+            VideoJob::forget_paused(name);
+        }
+        let (msg, done) = make_video(v, self.mp4.as_deref(), self.pngs.as_deref(), self.done, cancel, rows, on_frame)?;
+        if done == v.frames.count() {
+            VideoJob::forget_paused(name);
+        } else if done > self.done {
+            let paused = VideoJob { done, ..self.clone() };
+            let saved = std::fs::create_dir_all(projects_dir()).and_then(|_| std::fs::write(VideoJob::paused_file(name), paused.to_text()));
+            if let Err(e) = saved {
+                return Ok(format!("{msg} (it can't be resumed: could not save where it stopped: {e})"));
+            }
+        }
+        Ok(msg)
+    }
+}
+
 /// The bytes of the files in `dir`.
 fn folder_bytes(dir: &Path) -> usize {
     std::fs::read_dir(dir).map_or(0, |d| d.filter_map(|e| e.ok()?.metadata().ok()).map(|m| m.len() as usize).sum())
 }
 
-/// Renders every frame, writes it into `mp4` and/or as a PNG into `pngs`, and calls
-/// `on_frame` with it. `rows` and `rows_total` follow the render in progress. Stopping
-/// early (`cancel`) still finishes the file, with the frames done so far. Returns the
-/// message to show.
+/// Renders every frame from frame `start` on, writes it into `mp4` and/or as a PNG into
+/// `pngs`, and calls `on_frame` with it. With `start` > 0, the first `start` frames are
+/// already in `mp4` (a finished file) and `pngs`. `rows` and `rows_total` follow the
+/// render in progress. Stopping early (`cancel`) still finishes the file, with the
+/// frames done so far. Returns the message to show and the number of frames done.
 pub fn make_video(
     v: &VideoSettings,
     mp4: Option<&Path>,
     pngs: Option<&Path>,
+    start: usize,
     cancel: &AtomicBool,
     (rows, rows_total): (&AtomicUsize, &AtomicUsize),
     on_frame: &mut dyn FnMut(FrameDone),
-) -> Result<String, String> {
+) -> Result<(String, usize), String> {
     let f = &v.frames;
     let n = f.count();
     let (w, h) = (f.width(), f.height);
@@ -86,6 +174,13 @@ pub fn make_video(
         std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     }
     let mut enc = match mp4 {
+        Some(out) if start > 0 => {
+            let enc = Mp4Out::resume(out, w, h, v.fps, v.qp)?;
+            if enc.frames != start {
+                return Err(format!("{} has {} frames, not the {start} it was paused at", out.display(), enc.frames));
+            }
+            Some(enc)
+        }
         Some(out) => Some(Mp4Out::new(out, w, h, v.fps, v.qp)?),
         None => None,
     };
@@ -116,8 +211,8 @@ pub fn make_video(
             levels.push(l);
         }
     }
-    let (mut done, mut png_bytes) = (0, 0);
-    'frames: for k in 0..n {
+    let (mut done, mut png_bytes) = (start, if start > 0 { pngs.map_or(0, folder_bytes) } else { 0 });
+    'frames: for k in start..n {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -147,8 +242,7 @@ pub fn make_video(
                 }
             }
         }
-        let c = &v.colouring;
-        let rgb = f.finish(k, &renders, &c.style, &|st| c.scale(&f.path, &levels, k, st));
+        let rgb = v.colouring.frame(f, k, &renders, &levels);
         if let Some(enc) = &mut enc {
             enc.push(&rgb)?;
         }
@@ -171,7 +265,7 @@ pub fn make_video(
     let took = duration_text(started.elapsed().as_secs_f64());
     let size = format!("{:.0} MB", bytes as f64 / 1e6);
     let what = mp4.or(pngs).map_or(String::new(), |p| p.display().to_string());
-    Ok(if done == 0 {
+    let msg = if done == 0 {
         if let Some(out) = mp4 {
             let _ = std::fs::remove_file(out);
         }
@@ -180,10 +274,11 @@ pub fn make_video(
         }
         "Stopped before the first frame was finished".into()
     } else if done < n {
-        format!("Stopped after {done} of {n} frames ({took}); saved the video so far ({size}): {what}")
+        format!("Paused after {done} of {n} frames ({took}); saved the video so far ({size}): {what}")
     } else {
         format!("Done in {took} ({size}): {what}")
-    })
+    };
+    Ok((msg, done))
 }
 
 #[cfg(test)]
@@ -334,7 +429,7 @@ mod tests {
         assert_eq!(n, frames.path.steps(0) + frames.path.steps(1) + 1);
         // steady brightness and the waypoints' length range in one of the two runs
         let colouring = if reuse {
-            Colouring { style: Style { by: ColourBy::Length, ..Style::default() }, steady: true, lh: LhScale::Waypoints }
+            Colouring { style: Style { by: ColourBy::Length, ..Style::default() }, steady: true, lh: LhScale::Waypoints, number_line: false }
         } else {
             Colouring::default()
         };
@@ -344,7 +439,7 @@ mod tests {
         let v = VideoSettings { frames, colouring, levels: Vec::new(), fps: 30, qp: 20, threads: 4 };
         let rows = (&AtomicUsize::new(0), &AtomicUsize::new(0));
         let mut rendered: Vec<(Vec<u8>, f64)> = Vec::new();
-        let msg = make_video(&v, Some(&out), Some(&pngs), &AtomicBool::new(false), rows, &mut |f| rendered.push((f.rgb, f.max))).unwrap();
+        let msg = make_video(&v, Some(&out), Some(&pngs), 0, &AtomicBool::new(false), rows, &mut |f| rendered.push((f.rgb, f.max))).unwrap().0;
         assert!(msg.starts_with("Done"), "{msg}");
         let maxes: Vec<f64> = rendered.iter().map(|f| f.1).collect();
         assert_eq!(maxes.len(), n);
@@ -385,9 +480,81 @@ mod tests {
         let (mp4, pngs) = output_paths(&dir.display().to_string(), "z", Format::Both);
         let v = VideoSettings { frames, colouring: Colouring::default(), levels: Vec::new(), fps: 30, qp: 20, threads: 2 };
         let rows = (&AtomicUsize::new(0), &AtomicUsize::new(0));
-        let msg = make_video(&v, mp4.as_deref(), pngs.as_deref(), &AtomicBool::new(true), rows, &mut |_| {}).unwrap();
+        let msg = make_video(&v, mp4.as_deref(), pngs.as_deref(), 0, &AtomicBool::new(true), rows, &mut |_| {}).unwrap().0;
         assert_eq!(msg, "Stopped before the first frame was finished");
         assert!(!mp4.unwrap().exists() && !pngs.unwrap().exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A video paused part way (twice, the second time before a new frame) and carried
+    /// on is the video made in one go: the same PNG frames, and an .mp4 with every frame,
+    /// decoding to them through the join, with no .part file left behind.
+    #[test]
+    fn paused_video_carries_on() {
+        let frames = Frames {
+            path: ZoomPath::new(vec![View::HOME, View { hw: 0.3, ..View::HOME }], 1.15),
+            maxes: vec![4, 6],
+            order: 3,
+            coefs: Coefs::ints(4),
+            fade: true,
+            reuse: true,
+            step: 1,
+            height: 144,
+            shape: Shape::Wide,
+            aa: 1,
+        };
+        let n = frames.count();
+        assert!(n >= 6, "{n}");
+        let v = VideoSettings { frames, colouring: Colouring::default(), levels: Vec::new(), fps: 30, qp: 20, threads: 4 };
+        let rows = (&AtomicUsize::new(0), &AtomicUsize::new(0));
+        let dir = std::env::temp_dir().join("algfrac_video_paused");
+        let _ = std::fs::remove_dir_all(&dir);
+        let (one, two) = (dir.join("one"), dir.join("two"));
+
+        let mut rendered = Vec::new();
+        let go = AtomicBool::new(false);
+        let (msg, _) = make_video(&v, Some(&one.join("z.mp4")), Some(&one.join("frames")), 0, &go, rows, &mut |f| rendered.push(f.rgb)).unwrap();
+        assert!(msg.starts_with("Done"), "{msg}");
+
+        let (mp4, pngs) = (two.join("z.mp4"), two.join("frames"));
+        let cancel = AtomicBool::new(false);
+        let (_, done) = make_video(&v, Some(&mp4), Some(&pngs), 0, &cancel, rows, &mut |f| cancel.store(f.k == 2, Ordering::Relaxed)).unwrap();
+        assert_eq!(done, 3);
+        let (msg, done) = make_video(&v, Some(&mp4), Some(&pngs), 3, &AtomicBool::new(true), rows, &mut |_| {}).unwrap();
+        assert_eq!(done, 3);
+        assert!(msg.starts_with(&format!("Paused after 3 of {n} frames")), "{msg}");
+        let mut first = None;
+        let (msg, done) = make_video(&v, Some(&mp4), Some(&pngs), 3, &go, rows, &mut |f| {
+            first.get_or_insert(f.k);
+        })
+        .unwrap();
+        assert_eq!((done, first), (n, Some(3)), "{msg}");
+        assert!(!two.join("z.mp4.part").exists());
+
+        for k in 0..n {
+            let name = format!("frame_{k:05}.png");
+            assert!(std::fs::read(one.join("frames").join(&name)).unwrap() == std::fs::read(pngs.join(&name)).unwrap(), "{name}");
+        }
+        let mut count = 0;
+        decode_mp4(&mp4, 1, |k, rgb, _, _| {
+            let (a, b) = (luma(&rendered[k as usize - 1]), luma(rgb));
+            let mean = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32;
+            assert!(mean < 3.0, "frame {k}: {mean}");
+            count += 1;
+            true
+        });
+        assert_eq!(count, n);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A paused video's file reads back.
+    #[test]
+    fn paused_video_file_round_trip() {
+        let p = VideoProject::new("deep dive", vec![("a".into(), View::HOME), ("b".into(), View { hw: 1e-5, ..View::HOME })], 3, Coefs::ints(9), 4.0, Style::default(), "C:\\v");
+        let job = VideoJob { project: p, done: 412, mp4: Some(PathBuf::from("D:\\my videos\\deep dive_2.mp4")), pngs: None };
+        assert_eq!(VideoJob::from_text(&job.to_text()).unwrap(), job);
+        let pngs = VideoJob { mp4: None, pngs: Some(PathBuf::from("D:\\v\\x_frames")), ..job.clone() };
+        assert_eq!(VideoJob::from_text(&pngs.to_text()).unwrap(), pngs);
+        assert!(VideoJob::from_text(&job.project.to_text()).is_err());
     }
 }

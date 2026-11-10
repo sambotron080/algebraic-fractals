@@ -8,6 +8,7 @@ use crate::colour::{colourise_with, ColourBy, Levels, Scale, Stats, Style};
 use crate::common::{choose_auto, View, MAX_COEF};
 use crate::density::Predictor;
 use crate::engine::{work_per_pixel, Coefs, Plan, Region, Render};
+use crate::numberline;
 use std::collections::HashMap;
 
 /// Frame heights offered; the width follows from the shape.
@@ -308,11 +309,13 @@ pub struct Colouring {
     /// between them (see `held_scale`), instead of each frame's own
     pub steady: bool,
     pub lh: LhScale,
+    /// draw the number line along the real axis
+    pub number_line: bool,
 }
 
 impl Default for Colouring {
     fn default() -> Colouring {
-        Colouring { style: Style::default(), steady: false, lh: LhScale::Waypoints }
+        Colouring { style: Style::default(), steady: false, lh: LhScale::Waypoints, number_line: false }
     }
 }
 
@@ -346,6 +349,16 @@ impl Colouring {
             _ => {}
         }
         s
+    }
+
+    /// Frame `k`'s pixels, from its renders (see `Frames::finish`), coloured on the scales
+    /// these settings give them, with the number line if there is one.
+    pub fn frame(&self, f: &Frames, k: usize, renders: &[(Render, Stats, f64)], levels: &[WaypointLevels]) -> Vec<u8> {
+        let mut rgb = f.finish(k, renders, &self.style, &|st| self.scale(&f.path, levels, k, st));
+        if self.number_line {
+            numberline::draw(&mut rgb, f.width(), f.height, &f.region(k));
+        }
+        rgb
     }
 }
 
@@ -462,7 +475,7 @@ mod tests {
         let by_len = Style { by: ColourBy::Length, ..Style::default() };
         let mid = path.frames() / 2;
         let own = a.scale(&by_len);
-        let each = Colouring { style: by_len, steady: false, lh: LhScale::Each };
+        let each = Colouring { style: by_len, steady: false, lh: LhScale::Each, number_line: false };
         assert_eq!(each.scale(&path, &levels, mid, &a), own);
         assert!(!each.needs_levels());
         let wp = Colouring { lh: LhScale::Waypoints, ..each };
@@ -473,7 +486,7 @@ mod tests {
         let fixed = Colouring { lh: LhScale::Fixed(2.0, 50.0), ..each };
         assert_eq!(fixed.scale(&path, &[], mid, &a).length, (2.0, 50.0));
         // steady brightness: the residual levels from the waypoints, at the ends exactly
-        let steady = Colouring { style: Style::default(), steady: true, lh: LhScale::Each };
+        let steady = Colouring { style: Style::default(), steady: true, lh: LhScale::Each, number_line: false };
         assert!(steady.needs_levels());
         let last = path.frames() - 1;
         assert_eq!(steady.scale(&path, &levels, last, &a).ln_hi, b.scale(&Style::default()).ln_hi);

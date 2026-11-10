@@ -76,7 +76,8 @@ A version tag (`v0.3.0`, …) runs [.github/workflows/release.yml](../.github/wo
 | [src/engine.rs](../src/engine.rs) | the search: `Coefs` (which coefficients), `Plan`, the direct (`Walk`) and lattice (`LatWalk`) searches, the tiled renderer for deep views (`Tiler`), `Region`, `render()`, `render_axes()`, `Render`, tests. No dependencies. |
 | [src/colour.rs](../src/colour.rs) | turning a `Render` into RGB: what to plot (`ColourBy`), scaling (`Style`), colormaps, per-render `Stats`, `Levels` and `Scale` |
 | [src/density.rs](../src/density.rs) | predicting how many algebraic numbers a view will contain, before rendering it (`Predictor`; see below) |
-| [src/common.rs](../src/common.rs) | `View`, saved locations and groups (`locations.tsv`), bringing in the old programs' places (`OldPlace`), number parsing and formatting, the auto order / max coefficient (`choose_auto`), default folders |
+| [src/common.rs](../src/common.rs) | `View`, saved locations and groups (`locations.tsv`; `add_constants` adds e and π once), bringing in the old programs' places (`OldPlace`), number parsing and formatting, the auto order / max coefficient (`choose_auto`), default folders |
+| [src/numberline.rs](../src/numberline.rs) | the number line: tick steps and labels for any zoom (`ticks`), drawn onto RGB or egui pixels (`draw`, `draw_pixels`) with egui's Hack font through `ab_glyph`. The explorer bakes it into its texture, so saved images match; videos draw it per frame (`Colouring::frame`) |
 | [src/icon.rs](../src/icon.rs) | the icon: the lotus flower around (−1)^(1/3), rendered at any size (`examples/make_icon.rs` writes `assets/icon.ico` and `icon.png`; `build.rs` puts the `.ico` into the `.exe`) |
 | [src/settings.rs](../src/settings.rs) | the remembered settings (`settings.tsv`) |
 | [src/png.rs](../src/png.rs) | minimal PNG writers: uncompressed with no dependencies (the command line's), and compressed with `miniz_oxide` (the app's) |
@@ -85,7 +86,7 @@ A version tag (`v0.3.0`, …) runs [.github/workflows/release.yml](../.github/wo
 | [src/video/frames.rs](../src/video/frames.rs) | `Frames` (everything that decides what the frames show), `Colouring` (one style for the whole video and its colour scale), `auto_maxes`, `Frames::frame_secs` |
 | [src/video/reuse.rs](../src/video/reuse.rs) | reusing renders between frames: the ladder of max coefficients, planning the patches, and making frames from them |
 | [src/video/project.rs](../src/video/project.rs) | `VideoProject`: every setting of a video, its `.afvideo` file, the waypoint edits, and bringing in the old video maker's `.path` files |
-| [src/video/make.rs](../src/video/make.rs) | `make_video`: the render loop, shared by the app and the command line, reporting each frame through a callback |
+| [src/video/make.rs](../src/video/make.rs) | `make_video`: the render loop, shared by the app and the command line, reporting each frame through a callback; `VideoJob`: a video to make, from frame 0 or carrying on with a paused one |
 | [src/lib.rs](../src/lib.rs) | exposes the modules above as the `algfrac` library |
 | [src/main.rs](../src/main.rs) | the app: the window, the video window's viewport, quitting, remembered settings |
 | [src/app/explore.rs](../src/app/explore.rs) | the explorer: toolbar, settings strip, image, status bar |
@@ -391,6 +392,18 @@ frames, which keeps both the zoom and the pan within their speeds.
 - **Muxing:** the [`mp4`](https://crates.io/crates/mp4) crate writes the container. Its samples are AVCC: NAL units with 4-byte length prefixes instead of Annex B start codes. The SPS and PPS go into the `avcC` header and are left out of the samples, so the file is created when the first frame arrives, which is when they're known.
 - **Stopping early:** `write_end` still runs when the render is stopped, so a stopped video plays. Stopped before the first frame, the file is deleted.
 
+### Pausing and resuming
+
+Every stop part way is a pause: the video so far is finished and playable, and `VideoJob::make` records it in `projects/<name>.afpaused` in the settings folder. That file is the project as it was rendered (the usual `key<tab>value` lines) plus `done`, `mp4` and `pngs`. Resuming makes the video from that copy, not the current project, so frames rendered before and after a pause always match. Finishing the video deletes the record; starting it again from frame 0 deletes it first.
+
+`make_video(…, start, …)` carries on from frame `start`:
+- **MP4:** `Mp4Out::resume` reads the old file and copies its samples into `<name>.mp4.part`. A fresh encoder adds the new frames, starting with a keyframe, and `finish` renames the `.part` file over the old one. Until then the old file is untouched, so a crash while resuming loses nothing. The file has one SPS/PPS for every frame. A new encoder with the same settings produces the same bytes, and `push` checks this on the first new frame.
+- **PNG frames:** carry on in the same folder.
+- **Reuse:** patches are rendered when first needed, so those that span the pause are rendered again. Renders are deterministic, so the frames are identical to an uninterrupted run (the tests compare the PNGs byte for byte).
+- **Levels:** the waypoints' levels are measured again (or taken from the app's preview cache).
+
+The app reads the project's `.afpaused` file when its name changes, and the command line reads it in `video()`. Both use the same file, so either can resume a video paused in the other.
+
 **Video projects** ([project.rs](../src/video/project.rs)) are `key<tab>value` text files, `projects/<name>.afvideo` in the settings folder, with one `wp` line per waypoint (name, centre, half-width, max coefficient, auto, pan speed and keep-flower to the next). Unknown keys are ignored and missing ones take their defaults, so files move freely between versions. The old video maker's `.path` files open as new projects, with their first waypoint's colouring for the whole video.
 
 **Licensing.** OpenH264's source is BSD-licensed. H.264 itself is covered by patents. Cisco pays the licence fees only for its own prebuilt OpenH264 binaries, not for builds compiled from source like this one. For personal, non-commercial use this is rarely a concern. For commercial distribution, check the rules that apply to you.
@@ -439,6 +452,7 @@ algfrac: order 4, coefficients integers |c| <= 32
 | `--brightness B` / `--contrast K` / `--saturation S` | final-colour adjustments (see Colouring) | 0 / 1 / 1 |
 | `--out NAME` | output name (`NAME.png`, `NAME.algf`) | `algfrac_out` |
 | `--nodata` | skip the `.algf` file | |
+| `--numberline` | draw the number line along the real axis | |
 | `--threads T` | worker threads | all cores |
 
 The command line's PNGs are written uncompressed (byte for byte as the old `algfrac.exe` wrote them), so they are about 3 bytes per pixel. Re-save them in any image editor to shrink them. The app's are compressed.
@@ -451,7 +465,7 @@ dist\algfrac.exe video D:\shared\dive.afvideo # or a project file
 dist\algfrac.exe video --list                 # the saved projects
 ```
 
-It renders the project exactly as the app's Render now would (the same `make_video`), after choosing the automatic max coefficients again. `--out FOLDER` writes it somewhere other than the project's folder, and `--threads T` limits the worker threads. It prints the frame, the size so far and the time left every 2 s. Ctrl+C stops after the current frame and keeps the video so far; a second Ctrl+C stops at once. Rendering long videos this way (overnight, say) leaves the app free.
+It renders the project exactly as the app's Render now would (the same `make_video`), after choosing the automatic max coefficients again. `--out FOLDER` writes it somewhere other than the project's folder, and `--threads T` limits the worker threads. It prints the frame, the size so far and the time left every 2 s. Ctrl+C pauses after the current frame and keeps the video so far, and `--resume` carries on with it (see [Pausing and resuming](#pausing-and-resuming)); a second Ctrl+C stops at once. While a project has a paused video, it refuses to start without `--resume` or `--restart`, so a long render isn't lost by mistake. Rendering long videos this way (overnight, say) leaves the app free.
 
 ### `.algf` data format
 
@@ -534,8 +548,9 @@ The results were checked pixel by pixel against an independent brute-force imple
 - that the density model's root densities integrate to exactly `d` roots for each degree;
 - the root finder;
 - that the auto settings land near the target root density, and never decrease as you zoom in;
-- the zoom path, the max coefficient curve, the colour scales, `.mp4` and PNG-frame writing, short end-to-end videos with and without reuse, and stopping before the first frame (see [Zoom videos](#zoom-videos));
+- the zoom path, the max coefficient curve, the colour scales, `.mp4` and PNG-frame writing, short end-to-end videos with and without reuse, stopping before the first frame, and a video paused twice and resumed matching one made in one go (identical PNGs, an `.mp4` that decodes through the join), with its `.afpaused` record reading back (see [Zoom videos](#zoom-videos));
 - saved locations and groups, video projects and remembered settings reading back exactly, and files from the old programs (`tests/data/`) loading;
+- the number line's ticks (labels never touch, and sit on their values, at depths down to 10⁻¹²) and where it's drawn (on the axis, or along the nearest edge);
 - the compressed PNG writer.
 
 `recolour_speed` prints the time to recolour 1024 × 1024. On real renders, the lattice search returns the same polynomial as the direct search on every pixel except exact ties (e.g. two polynomials with equal `Σ|ci|` giving exactly 0.0016). The density predictions are checked against exact counts by `cargo run --release --example density_check` (see [Predicting the density](#predicting-the-density-densityrs)).

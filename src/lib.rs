@@ -7,6 +7,7 @@ pub mod common;
 pub mod density;
 pub mod engine;
 pub mod icon;
+pub mod numberline;
 pub mod png;
 pub mod settings;
 pub mod video;
